@@ -14,6 +14,15 @@ class YieldCurve:
         # Sort nodes by time
         self.nodes = sorted(self.nodes, key=lambda x: x[0])
         
+        # Remove duplicate time points (keep first occurrence)
+        seen = set()
+        unique_nodes = []
+        for t, df in self.nodes:
+            if t not in seen:
+                seen.add(t)
+                unique_nodes.append((t, df))
+        self.nodes = unique_nodes
+        
         # Default yearfrac function if not provided
         if self.yearfrac is None:
             self.yearfrac = self._default_yearfrac
@@ -68,16 +77,18 @@ class YieldCurve:
         return -math.log(self.df(t)) / t
 
     def _df_loglinear(self, t: float) -> float:
-        """Linear interpolation on ln(df)."""
+        """Linear interpolation on ln(df) with proper extrapolation."""
         if not self.nodes:
             raise ValueError("No nodes available.")
             
         if t <= self.nodes[0][0]:
-            return self.nodes[0][1]
+            # Extrapolate left using first segment
+            return self._extrapolate_left(t)
         if t >= self.nodes[-1][0]:
-            return self.nodes[-1][1]
+            # Extrapolate right using last segment
+            return self._extrapolate_right(t)
             
-        # Find the interval containing t
+        # Interpolate within range
         for i in range(1, len(self.nodes)):
             t0, df0 = self.nodes[i-1]
             t1, df1 = self.nodes[i]
@@ -86,6 +97,40 @@ class YieldCurve:
                 return math.exp((1-w)*math.log(df0) + w*math.log(df1))
                 
         return self.nodes[-1][1]
+
+    def _extrapolate_left(self, t: float) -> float:
+        """Extrapolate ln(df) linearly using the first segment."""
+        if len(self.nodes) == 1:
+            # Single node: flat forward extrapolation
+            t1, df1 = self.nodes[0]
+            return math.exp(math.log(df1) * (t / t1))
+        
+        # Use first two nodes for extrapolation
+        t0, df0 = self.nodes[0]
+        t1, df1 = self.nodes[1]
+        
+        # Linear extrapolation on ln(df)
+        ln0, ln1 = math.log(df0), math.log(df1)
+        slope = (ln1 - ln0) / (t1 - t0)
+        ln = ln0 + slope * (t - t0)
+        return math.exp(ln)
+
+    def _extrapolate_right(self, t: float) -> float:
+        """Extrapolate ln(df) linearly using the last segment."""
+        if len(self.nodes) == 1:
+            # Single node: flat forward extrapolation
+            t1, df1 = self.nodes[0]
+            return math.exp(math.log(df1) * (t / t1))
+        
+        # Use last two nodes for extrapolation
+        t0, df0 = self.nodes[-2]
+        t1, df1 = self.nodes[-1]
+        
+        # Linear extrapolation on ln(df)
+        ln0, ln1 = math.log(df0), math.log(df1)
+        slope = (ln1 - ln0) / (t1 - t0)
+        ln = ln0 + slope * (t - t0)
+        return math.exp(ln)
 
     def zero_rate_simple(self, x: float) -> float:
         """

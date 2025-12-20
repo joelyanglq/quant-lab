@@ -14,6 +14,7 @@ class BootstrapConfig:
     tol: float = 1e-12
     allow_df_increase: bool = False
     return_report: bool = True
+    interpolator: Optional[object] = None  # Interpolator to fit on final curve
 
 class Bootstrapper:
     def __init__(self, config: BootstrapConfig = BootstrapConfig()):
@@ -68,13 +69,51 @@ class Bootstrapper:
         if len(items) == 0:
             raise ValueError("After filtering, no instruments with future cashflows remain.")
 
-        # Sort by maturity time (short to long)
-        items.sort(key=lambda x: x["maturity_t"])
-
         # Bootstrap nodes
         nodes_t: List[float] = []
         nodes_df: List[float] = []
         report_rows: List[dict] = []
+
+        # Remove duplicates by maturity_t (choose better one)
+        maturity_groups = {}
+        for item in items:
+            key = round(item["maturity_t"], 10)
+            if key not in maturity_groups:
+                maturity_groups[key] = []
+            maturity_groups[key].append(item)
+
+        unique_items = []
+        dropped_items = []
+        for key, group in maturity_groups.items():
+            if len(group) == 1:
+                unique_items.append(group[0])
+            else:
+                # Choose the one with valid price and more reasonable cashflows
+                # For now, keep the first one but mark others as dropped
+                # TODO: Implement better selection logic
+                unique_items.append(group[0])
+                dropped_items.extend(group[1:])
+        
+        # Add dropped items to report
+        for item in dropped_items:
+            report_rows.append({
+                "step": "dropped",
+                "inst_id": item["inst_id"],
+                "maturity_t": item["maturity_t"],
+                "maturity_date": item["maturity_date"],
+                "price": item["price"],
+                "pv_known": np.nan,
+                "cf_maturity": np.nan,
+                "df_solved": np.nan,
+                "zero_cont": np.nan,
+                "residual": np.nan,
+                "status": "dropped",
+                "warn": "duplicate_maturity",
+            })
+
+        # Sort by maturity time (short to long)
+        items = unique_items
+        items.sort(key=lambda x: x["maturity_t"])
 
         prev_df: Optional[float] = None
         
@@ -116,9 +155,12 @@ class Bootstrapper:
             elif df_n <= 0:
                 status = "fail"
                 warn = "df_nonpositive"
-            elif not self.cfg.allow_df_increase and prev_df is not None and df_n > prev_df + 1e-10:
+            elif not self.cfg.allow_df_increase and prev_df is not None and df_n > prev_df + self.cfg.tol:
                 status = "warn"
                 warn = "df_increasing"
+            elif df_n > 1.05:  # Warn for unusually high DF
+                status = "warn"
+                warn = "df_high"
 
             # Also check numer positivity (should be > 0 for positive df)
             if status != "fail" and numer <= 0:
@@ -184,8 +226,12 @@ class Bootstrapper:
         final_curve = YieldCurve(
             val_date=val_date,
             nodes=list(zip(nodes_t, nodes_df)),
-            yearfrac=self.cfg.yearfrac
+            yearfrac=self.cfg.yearfrac,
         )
+        
+        # Fit interpolator if provided
+        if self.cfg.interpolator is not None:
+            final_curve = final_curve.fit(self.cfg.interpolator)
         
         if self.cfg.return_report:
             report_df = pd.DataFrame(report_rows)
