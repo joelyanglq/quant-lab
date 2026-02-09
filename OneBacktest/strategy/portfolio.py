@@ -1,17 +1,15 @@
-import pandas as pd
 from typing import Dict, List
 import queue
 
 from data.types import Bar
-from event import EventType, SignalEvent, SignalType, OrderEvent, FillEvent, OrderType, OrderSide
+from event import EventType, FillEvent, OrderSide
 
 
 class Portfolio:
     """
-    组合管理
+    组合管理（只记账）
 
-    跟踪持仓、市值，处理信号→订单→成交。
-    通过 latest_prices 引用获取最新价格（由 Engine 维护）。
+    跟踪持仓、市值、P&L。不生成订单。
     """
 
     def __init__(self, symbols: List[str], latest_prices: Dict[str, Bar],
@@ -46,43 +44,6 @@ class Portfolio:
 
         self.current_holdings['total'] = self.current_holdings['cash'] + total_market_value
         self.all_holdings.append(self.current_holdings.copy())
-
-    def update_signal(self, event: SignalEvent):
-        if event.event_type == EventType.SIGNAL:
-            order_event = self.generate_order(event)
-            if order_event is not None:
-                self.events.put(order_event)
-
-    def generate_order(self, signal: SignalEvent) -> OrderEvent:
-        symbol = signal.symbol
-        direction = signal.signal_type
-        mkt_quantity = 100
-        cur_quantity = self.current_positions.get(symbol, 0)
-
-        if direction == SignalType.LONG:
-            side = OrderSide.BUY
-        elif direction == SignalType.SHORT:
-            side = OrderSide.SELL
-        elif direction == SignalType.EXIT:
-            if cur_quantity > 0:
-                side = OrderSide.SELL
-                mkt_quantity = abs(cur_quantity)
-            elif cur_quantity < 0:
-                side = OrderSide.BUY
-                mkt_quantity = abs(cur_quantity)
-            else:
-                return None
-        else:
-            return None
-
-        return OrderEvent(
-            timestamp=signal.timestamp,
-            order_id=str(id(object())),
-            symbol=symbol,
-            side=side,
-            order_type=OrderType.MARKET,
-            quantity=mkt_quantity,
-        )
 
     def update_fill(self, event: FillEvent):
         if event.event_type == EventType.FILL:
