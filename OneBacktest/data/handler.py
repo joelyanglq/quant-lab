@@ -1,168 +1,125 @@
-from abc import ABC, abstractmethod
-from datetime import datetime
-from typing import List, Optional, Dict
-import pandas as pd
+"""
+DataHandler - 混合设计（Iterator + Query）
+
+- 从 DataFeed（Iterator）拉取数据
+- 内部缓存历史 bar（deque 限制长度）
+- 提供 get_latest_bars() 给策略查询
+- 生成 MarketEvent 推送到事件队列
+"""
 import queue
+from collections import deque
+from typing import List, Optional, Dict
 
+import pandas as pd
+
+from .feed import DataFeed
+from .types import Bar
 from event import MarketEvent
-from .manager import DataManager
-from .base import Frequency
 
-class DataHandler(ABC):
+
+class DataHandler:
     """
-    DataHandler is an abstract base class providing an interface for
-    all subsequent (inherited) data handlers (both live and historic).
+    数据处理器（中间层）
 
-    The goal of a (derived) DataHandler object is to output a generated
-    set of bars (OHLCVI) for each symbol requested.
+    职责：
+    1. 从 DataFeed 逐个拉取 Bar
+    2. 缓存每个标的最近 N 个 bar（供策略查询指标）
+    3. 向事件队列发送 MarketEvent
 
-    This will replicate how a live strategy would function as current
-    market data would be sent "down the pipe". Thus a historic and live
-    system will be treated identically by the rest of the backtesting suite.
-    """
-
-    @abstractmethod
-    def get_latest_bars(self, symbol: str, N: int = 1) -> pd.DataFrame:
-        """
-        Returns the last N bars from the latest_symbol list,
-        or fewer if less bars are available.
-        """
-        raise NotImplementedError("Should implement get_latest_bars()")
-
-    @abstractmethod
-    def update_bars(self):
-        """
-        Pushes the latest bar to the latest_symbol_data structure
-        for all symbols in the symbol list.
-        """
-        raise NotImplementedError("Should implement update_bars()")
-
-class HistoricDataHandler(DataHandler):
-    """
-    HistoricDataHandler is designed to read CSV files for
-    each requested symbol from disk and provide an interface
-    to obtain the "latest" bar in a manner identical to a live
-    trading interface.
+    使用方式：
+        handler = DataHandler(data_feed, events, cache_size=200)
+        while handler.update():
+            pass  # 引擎会从事件队列消费 MarketEvent
     """
 
-    def __init__(self, events: queue.Queue, data_manager: DataManager, 
-                 symbols: List[str], start: datetime, end: datetime, frequency: Frequency = Frequency.DAY):
-        """
-        Initializes the historic data handler.
-
-        Parameters:
-        events: The Event Queue.
-        data_manager: DataManager instance to fetch data.
-        symbols: A list of symbol strings.
-        start: Start datetime.
-        end: End datetime.
-        frequency: Data frequency.
-        """
+    def __init__(
+        self,
+        data_feed: DataFeed,
+        events: queue.Queue,
+        cache_size: int = 200,
+    ):
+        self.data_feed = data_feed
         self.events = events
-        self.data_manager = data_manager
-        self.symbols = symbols
-        self.start = start
-        self.end = end
-        self.frequency = frequency
+        self.cache_size = cache_size
 
-        self.symbol_data = {}
-        self.latest_symbol_data = {}
+        # {symbol: deque([Bar, Bar, ...], maxlen=cache_size)}
+        self._bars_cache: Dict[str, deque] = {}
+        self._current_time: Optional[pd.Timestamp] = None
         self.continue_backtest = True
-        self.bar_index = 0
-        
-        # Load data
-        self._load_data()
 
-    def _load_data(self):
+    def update(self) -> bool:
         """
-        Loads data from DataManager and converts to generator/iterator.
-        """
-        comb_index = None
-        for s in self.symbols:
-            # Load data using DataManager
-            # Note: DataManager.get_bars returns a DataFrame
-            df = self.data_manager.get_bars(s, self.start, self.end, self.frequency)
-            
-            # Reindex to ensure all symbols have the same index (handling missing data)
-            if comb_index is None:
-                comb_index = df.index
-            else:
-                comb_index = comb_index.union(df.index)
-            
-            self.symbol_data[s] = df
-            self.latest_symbol_data[s] = []
+        从 DataFeed 拉取下一个 Bar，缓存并生成 MarketEvent
 
-        # Reindex all dataframes to the combined index and forward fill
-        for s in self.symbols:
-            self.symbol_data[s] = self.symbol_data[s].reindex(index=comb_index, method='pad').iterrows()
-
-        self.comb_index = comb_index
-
-    def _get_new_bar(self, symbol):
+        Returns:
+            True  - 成功拉取到新数据
+            False - 数据已耗尽
         """
-        Returns the latest bar from the data feed as a tuple of 
-        (sybmol, datetime, open, low, high, close, volume).
-        """
-        try:
-            bar = next(self.symbol_data[symbol])
-            return bar
-        except StopIteration:
+        if not self.data_feed.has_next():
             self.continue_backtest = False
-            return None
+            return False
 
-    def get_latest_bars(self, symbol, N=1):
+        bar = self.data_feed.next()
+        if bar is None:
+            self.continue_backtest = False
+            return False
+
+        # 缓存
+        if bar.symbol not in self._bars_cache:
+            self._bars_cache[bar.symbol] = deque(maxlen=self.cache_size)
+        self._bars_cache[bar.symbol].append(bar)
+
+        # 更新当前时间
+        self._current_time = bar.timestamp
+
+        # 发送 MarketEvent
+        event = MarketEvent(timestamp=bar.timestamp, symbol=bar.symbol)
+        self.events.put(event)
+
+        return True
+
+    # ==================== 查询接口（给策略用） ====================
+
+    def get_latest_bars(self, symbol: str, N: int = 1) -> List[Bar]:
         """
-        Returns the last N bars from the latest_symbol list,
-        or N-k if less available.
+        返回最近 N 个 Bar
+
+        Args:
+            symbol: 标的代码
+            N: 需要的 bar 数量
+
+        Returns:
+            Bar 列表（按时间正序），不足 N 个则返回已有的全部
         """
-        try:
-            bars_list = self.latest_symbol_data[symbol]
-        except KeyError:
-            print("That symbol is not available in the historical data set.")
+        bars = self._bars_cache.get(symbol)
+        if bars is None:
             return []
-        else:
-            return pd.DataFrame(bars_list[-N:], columns=['open', 'high', 'low', 'close', 'volume', 'turnover', 'open_interest'])
+        return list(bars)[-N:]
 
-    def update_bars(self):
+    def get_latest_bar(self, symbol: str) -> Optional[Bar]:
+        """返回最新的一个 Bar"""
+        bars = self._bars_cache.get(symbol)
+        if not bars:
+            return None
+        return bars[-1]
+
+    def get_latest_bars_df(self, symbol: str, N: int = 1) -> pd.DataFrame:
         """
-        Pushes the latest bar to the latest_symbol_data structure
-        for all symbols in the symbol list.
+        返回最近 N 个 Bar 的 DataFrame（方便计算指标）
+
+        Returns:
+            DataFrame，列: open, high, low, close, volume
         """
-        for s in self.symbols:
-            try:
-                bar = next(self.symbol_data[s])
-            except StopIteration:
-                self.continue_backtest = False
-                return
-            else:
-                if bar is not None:
-                    # bar is a tuple (index, Series)
-                    timestamp = bar[0]
-                    data = bar[1]
-                    
-                    # Append to latest_symbol_data
-                    self.latest_symbol_data[s].append(data)
-                    
-                    # Create MarketEvent
-                    # Note: We might want to optimize this to send one event per timestamp for all symbols
-                    # But for now, one event per symbol per timestamp is fine for simplicity
-                    # Actually, usually MarketEvent signals that "new data is available"
-                    # It doesn't necessarily need to carry the data if the strategy queries the handler.
-                    # But let's stick to the event carrying timestamp.
-                    pass
-        
-        # After updating all symbols for this timestamp, generate a MarketEvent
-        # We assume all symbols are aligned on the same timestamp (comb_index)
-        if self.continue_backtest:
-             # Get the current timestamp from the iterator? 
-             # Since we are iterating generators, it's a bit tricky to know the "current" timestamp 
-             # if we just called next() on all of them.
-             # However, we reindexed them to comb_index.
-             
-             # Let's verify if we are still in bounds
-             if self.bar_index < len(self.comb_index):
-                 timestamp = self.comb_index[self.bar_index]
-                 self.bar_index += 1
-                 self.events.put(MarketEvent(timestamp=timestamp))
-             else:
-                 self.continue_backtest = False
+        bars = self.get_latest_bars(symbol, N)
+        if not bars:
+            return pd.DataFrame()
+        return pd.DataFrame([b.to_dict() for b in bars]).set_index('timestamp')
+
+    def get_current_time(self) -> Optional[pd.Timestamp]:
+        """获取当前时间"""
+        return self._current_time
+
+    @property
+    def symbols(self) -> List[str]:
+        """已缓存的标的列表"""
+        return list(self._bars_cache.keys())

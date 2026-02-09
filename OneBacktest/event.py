@@ -1,35 +1,31 @@
-from abc import ABC, abstractmethod
-from enum import Enum
-from datetime import datetime
-from typing import Optional
+"""事件定义模块"""
 from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Optional
+
+
+# ==================== 枚举类型 ====================
 
 class EventType(Enum):
     MARKET = 'market'
     SIGNAL = 'signal'
     ORDER = 'order'
     FILL = 'fill'
-
-@dataclass(frozen=True)
-class BaseEvent:
-    """
-    事件基类
-    
-    所有事件都应该继承这个类
-    frozen=True 保证事件不可变，避免意外修改
-    """
-    event_type: EventType
-    timestamp: datetime
-    event_id: str = field(default_factory=lambda: str(id(object())))
-    
-    def __repr__(self):
-        return f"{self.__class__.__name__}(timestamp={self.timestamp}, id={self.event_id[:8]}...)"
+    CANCEL = 'cancel'
 
 
+class OrderSide(Enum):
+    """订单方向"""
+    BUY = 'buy'
+    SELL = 'sell'
 
-class MarketEvent(BaseEvent):
-    def __init__(self):
-        super().__init__()
+
+class OrderType(Enum):
+    MARKET = 'market'
+    LIMIT = 'limit'
+    STOP = 'stop'
+    STOP_LIMIT = 'stop_limit'
 
 
 class SignalType(Enum):
@@ -40,83 +36,112 @@ class SignalType(Enum):
     SHORT_EXIT = 'short_exit'
 
 
+# ==================== 基类 ====================
+
+@dataclass(frozen=True)
+class BaseEvent:
+    """
+    事件基类（不可变）
+
+    所有事件都应该继承这个类
+    frozen=True 保证事件不可变，避免意外修改
+    """
+    timestamp: datetime
+    event_id: str = field(default_factory=lambda: str(id(object())))
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(timestamp={self.timestamp}, id={self.event_id[:8]}...)"
+
+
+# ==================== 具体事件 ====================
+
+@dataclass(frozen=True)
+class MarketEvent(BaseEvent):
+    """
+    市场数据事件
+
+    当新的 bar 到达时由 DataHandler 生成
+    """
+    symbol: str = ''
+    event_type: EventType = field(default=EventType.MARKET, init=False)
+
+
+@dataclass(frozen=True)
 class SignalEvent(BaseEvent):
-    symbol: str
-    signal_type: SignalType
+    """交易信号事件"""
+    symbol: str = ''
+    signal_type: SignalType = SignalType.LONG
     strength: float = 1.0  # 信号强度 [0, 1]
-
-    def __init__(self, **kwargs):
-        if 'event_type' not in kwargs:
-            kwargs['event_type'] = EventType.SIGNAL
-        object.__setattr__(self, 'event_type', kwargs.pop('event_type'))
-        for key, value in kwargs.items():
-            object.__setattr__(self, key, value)
+    event_type: EventType = field(default=EventType.SIGNAL, init=False)
 
 
-class OrderType(Enum):
-    """
-    https://www.xs.com/zh-Hans/blog/%E8%82%A1%E7%A5%A8%E4%BA%A4%E6%98%93%E8%AE%A2%E5%8D%95%E7%B1%BB%E5%9E%8B/
-    """
-    MARKET = 'market'
-    LIMIT = 'limit'
-    STOP = 'stop'
-    STOP_LIMIT = 'stop_limit'
-    TRAILING_STOP = 'trailing_stop'  # 追踪止损单
-    IOC =  'ioc'  # 立即成交或取消
-    GTC = 'gtc'  # 取消前有效
-    FOK = 'fok'  # 全部成交或取消
-    AON = 'aon'  # 立即全部执行或取消订单
-
-class OrderSide(Enum):
-    """订单方向"""
-    BUY = 'buy'
-    SELL = 'sell'
-
-
+@dataclass(frozen=True)
 class OrderEvent(BaseEvent):
-    """
-    message sent to ExecutionHandler.
+    """订单事件"""
+    order_id: str = ''
+    symbol: str = ''
+    side: OrderSide = OrderSide.BUY
+    order_type: OrderType = OrderType.MARKET
+    quantity: int = 0
+    price: Optional[float] = None       # 限价单价格
+    stop_price: Optional[float] = None  # 止损价格
+    event_type: EventType = field(default=EventType.ORDER, init=False)
 
-    我们需要记录什么：
-    订单标号：
-    订单类型limit order / market order
-    股票代码
-    股票数量
-    价格限制: limit order
-    到期日？
-    """
-    order_id: str
-    symbol: str
-    side: OrderSide
-    order_type: OrderType
-    quantity: float
-
-    # 价格信息
-    price: Optional[float] = None           # 限价单价格
-    stop_price: Optional[float] = None      # 止损价格
+    def print_order(self):
+        print(
+            f'[Order {self.order_id}]: Symbol={self.symbol}, '
+            f'Side={self.side.value}, Qty={self.quantity}, '
+            f'Type={self.order_type.value}'
+        )
 
 
+@dataclass(frozen=True)
 class FillEvent(BaseEvent):
     """
     成交事件
-    
-    订单成交时触发
-    记录每一笔成交的详细信息
+
+    一个订单可能产生多个 FillEvent（部分成交）
+    费用/滑点由执行器计算后填入，此类仅作为数据载体
     """
-    def __init__(self, **kwargs):
-        if 'event_type' not in kwargs:
-            kwargs['event_type'] = EventType.FILL
-        object.__setattr__(self, 'event_type', kwargs.pop('event_type'))
-        for key, value in kwargs.items():
-            object.__setattr__(self, key, value)
+    # 身份标识
+    fill_id: str = ''               # 成交唯一ID
+    order_id: str = ''              # 关联的订单ID
+
+    # 成交信息
+    symbol: str = ''
+    side: OrderSide = OrderSide.BUY
+    fill_price: float = 0.0         # 本次成交价格（已含滑点）
+    fill_quantity: int = 0          # 本次成交数量
+
+    # 费用信息（由执行器计算）
+    commission: float = 0.0
+    slippage: float = 0.0
+
+    # 可选字段
+    liquidity: str = 'REMOVE'       # 'ADD'(限价) or 'REMOVE'(市价)
+    exchange: str = ''              # 交易所标识
+    execution_id: str = ''          # 券商返回的成交编号（实盘用）
+
+    event_type: EventType = field(default=EventType.FILL, init=False)
 
     @property
     def total_cost(self) -> float:
-        """总成本（包含佣金和滑点）"""
+        """总成本（含佣金）"""
         base_cost = self.fill_price * self.fill_quantity
         if self.side == OrderSide.BUY:
-            return base_cost + self.commission + self.slippage
+            return base_cost + self.commission
         else:
-            return base_cost - self.commission - self.slippage
+            return base_cost - self.commission
 
-    
+    @property
+    def notional(self) -> float:
+        """名义价值"""
+        return self.fill_price * self.fill_quantity
+
+
+@dataclass(frozen=True)
+class CancelEvent(BaseEvent):
+    """订单取消事件"""
+    order_id: str = ''
+    reason: str = ''
+    event_type: EventType = field(default=EventType.CANCEL, init=False)
