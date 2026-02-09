@@ -1,59 +1,60 @@
-from datetime import datetime
+from collections import deque
+from typing import List, Dict
 import numpy as np
-import pandas as pd
 import queue
 
 from strategy.base import Strategy
-from event import SignalEvent, MarketEvent, SignalType
+from data.types import Bar
+from event import SignalEvent, SignalType
+
 
 class SimpleMAStrategy(Strategy):
     """
-    Simple Moving Average Crossover Strategy.
+    简单均线交叉策略
+
+    内部缓存每个 symbol 的 close 序列，计算短期/长期均线交叉。
     """
-    def __init__(self, data_handler, events: queue.Queue, short_window=50, long_window=200):
-        self.data_handler = data_handler
-        self.events = events
+
+    def __init__(self, symbols: List[str], short_window=50, long_window=200):
+        self.symbols = symbols
         self.short_window = short_window
         self.long_window = long_window
-        self.symbol_list = self.data_handler.symbols
-        self.bought = self._calculate_initial_bought()
+        self.events: queue.Queue = None  # 由 Engine 注入
 
-    def _calculate_initial_bought(self):
-        """
-        Adds keys to the bought dictionary for all symbols
-        and sets them to 'OUT'.
-        """
-        bought = {}
-        for s in self.symbol_list:
-            bought[s] = 'OUT'
-        return bought
+        # 每个 symbol 缓存 close 价格
+        self._closes: Dict[str, deque] = {
+            s: deque(maxlen=long_window + 1) for s in symbols
+        }
+        self.bought = {s: 'OUT' for s in symbols}
 
-    def calculate_signals(self, event: MarketEvent):
-        """
-        Generates a new SignalEvent based on the MAC.
-        """
-        if event.event_type == 'market':
-            for s in self.symbol_list:
-                bars = self.data_handler.get_latest_bars(s, N=self.long_window+1)
-                
-                if bars is not None and len(bars) > self.long_window:
-                    # Calculate MAs
-                    short_ma = np.mean(bars['close'].iloc[-self.short_window:])
-                    long_ma = np.mean(bars['close'].iloc[-self.long_window:])
-                    
-                    dt = bars.index[-1]
-                    
-                    symbol = s
-                    strength = 1.0
-                    
-                    if short_ma > long_ma and self.bought[s] == 'OUT':
-                        print(f"LONG Signal for {s} at {dt}")
-                        signal = SignalEvent(symbol=symbol, timestamp=dt, signal_type=SignalType.LONG, strength=strength)
-                        self.events.put(signal)
-                        self.bought[s] = 'LONG'
-                        
-                    elif short_ma < long_ma and self.bought[s] == 'LONG':
-                        print(f"EXIT Signal for {s} at {dt}")
-                        signal = SignalEvent(symbol=symbol, timestamp=dt, signal_type=SignalType.EXIT, strength=strength)
-                        self.events.put(signal)
-                        self.bought[s] = 'OUT'
+    def calculate_signals(self, bar: Bar):
+        if bar.symbol not in self._closes:
+            return
+
+        self._closes[bar.symbol].append(bar.close)
+        closes = self._closes[bar.symbol]
+
+        if len(closes) <= self.long_window:
+            return
+
+        short_ma = np.mean(list(closes)[-self.short_window:])
+        long_ma = np.mean(list(closes)[-self.long_window:])
+        s = bar.symbol
+
+        if short_ma > long_ma and self.bought[s] == 'OUT':
+            print(f"LONG Signal for {s} at {bar.timestamp}")
+            signal = SignalEvent(
+                symbol=s, timestamp=bar.timestamp,
+                signal_type=SignalType.LONG, strength=1.0,
+            )
+            self.events.put(signal)
+            self.bought[s] = 'LONG'
+
+        elif short_ma < long_ma and self.bought[s] == 'LONG':
+            print(f"EXIT Signal for {s} at {bar.timestamp}")
+            signal = SignalEvent(
+                symbol=s, timestamp=bar.timestamp,
+                signal_type=SignalType.EXIT, strength=1.0,
+            )
+            self.events.put(signal)
+            self.bought[s] = 'OUT'

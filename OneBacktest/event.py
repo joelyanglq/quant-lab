@@ -58,9 +58,7 @@ class BaseEvent:
 @dataclass(frozen=True)
 class MarketEvent(BaseEvent):
     """
-    市场数据事件
-
-    当新的 bar 到达时由 DataHandler 生成
+    市场数据事件（预留，未来实盘推送用）
     """
     symbol: str = ''
     event_type: EventType = field(default=EventType.MARKET, init=False)
