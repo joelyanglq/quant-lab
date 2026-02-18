@@ -1,6 +1,8 @@
 from typing import Dict, List
 import queue
 
+import pandas as pd
+
 from data.types import Bar
 from event import EventType, FillEvent, OrderSide
 
@@ -19,11 +21,11 @@ class Portfolio:
         self.events: queue.Queue = None  # 由 Engine 注入
         self.initial_capital = initial_capital
 
-        self.all_positions = []
         self.current_positions = dict()
-
-        self.all_holdings = []
         self.current_holdings = self._init_holdings()
+
+        self.all_holdings: List[dict] = []
+        self.trade_log: List[FillEvent] = []
 
     def _init_holdings(self):
         d = {s: 0.0 for s in self.symbols}
@@ -43,12 +45,16 @@ class Portfolio:
                 total_market_value += market_value
 
         self.current_holdings['total'] = self.current_holdings['cash'] + total_market_value
-        self.all_holdings.append(self.current_holdings.copy())
+
+        snapshot = self.current_holdings.copy()
+        snapshot['timestamp'] = bar.timestamp
+        self.all_holdings.append(snapshot)
 
     def update_fill(self, event: FillEvent):
         if event.event_type == EventType.FILL:
             self._update_positions(event)
             self._update_holdings(event)
+            self.trade_log.append(event)
 
     def _update_positions(self, fill: FillEvent):
         fill_dir = 1 if fill.side == OrderSide.BUY else -1
@@ -66,3 +72,13 @@ class Portfolio:
         self.current_holdings['commission'] += fill.commission
         self.current_holdings['cash'] -= (cost + fill.commission)
         self.current_holdings['total'] -= fill.commission
+
+    def get_equity_curve(self) -> pd.DataFrame:
+        """返回权益曲线 DataFrame（index=timestamp, columns 含 total/cash 等）"""
+        if not self.all_holdings:
+            return pd.DataFrame()
+        df = pd.DataFrame(self.all_holdings)
+        df = df.set_index('timestamp')
+        # 同一时间戳可能有多条（多 symbol），取最后一条
+        df = df[~df.index.duplicated(keep='last')]
+        return df

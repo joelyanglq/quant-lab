@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# data cache
+*_data_cache/
+*_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
