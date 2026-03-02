@@ -2,22 +2,24 @@
 IBKR Signal Advisor — CLI 入口
 
 用法:
-    python advisor_cli.py                              # 连接 IBKR paper (7497)
-    python advisor_cli.py --port 7496                  # 连接 IBKR live
-    python advisor_cli.py --offline                    # 不连 IBKR，只看信号
-    python advisor_cli.py --positions AAPL:100,NVDA:50 # 手动输入持仓
-    python advisor_cli.py --symbols AAPL,NVDA,GOOG     # 指定标的
+    cd OneBacktest
+    python -m strategies.timing.advisor.cli                  # 连接 IBKR paper (7497)
+    python -m strategies.timing.advisor.cli --port 7496      # 连接 IBKR live
+    python -m strategies.timing.advisor.cli --offline        # 不连 IBKR，只看信号
+    python -m strategies.timing.advisor.cli --positions AAPL:100,NVDA:50
+    python -m strategies.timing.advisor.cli --symbols AAPL,NVDA,GOOG
 """
 import sys
 import os
 import argparse
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 from data.storage.parquet import ParquetStorage
-from advisor.signal_engine import compute_all_signals
-from advisor.comparator import generate_recommendations
-from advisor.ibkr_reader import IBKRReader, IBAccount, HAS_IB_INSYNC, PORTS
+from strategies.timing.signals import compute_all_signals
+from strategies.timing.advisor.comparator import generate_recommendations
+from strategies.timing.advisor.ibkr_reader import IBKRReader, IBAccount, HAS_IB_INSYNC, PORTS
 
 
 DEFAULT_SYMBOLS = ['AVGO', 'AAPL', 'NBIS', 'TSM', 'GOOG', 'COHR', 'NVDA']

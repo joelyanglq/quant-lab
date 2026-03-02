@@ -2,7 +2,8 @@
 检查 HHT / QRS 策略最新信号
 """
 import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from collections import deque
 import numpy as np

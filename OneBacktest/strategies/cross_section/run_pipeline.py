@@ -4,7 +4,7 @@
 import sys, time, warnings, json
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 warnings.filterwarnings('ignore')
 
 import numpy as np
@@ -38,9 +38,9 @@ print('=' * 70)
 print('STEP 1: COMPUTE ALL 46 FACTORS')
 print('=' * 70)
 
-from factor_research.weekly_pipeline import compute_all_factors, prepare_weekly
-from factor_research.data_loader import load_index_symbols, load_price_panel
-from factor_research.screening import compute_ic_summary, screen_factors
+from strategies.cross_section.weekly_pipeline import compute_all_factors, prepare_weekly
+from strategies.cross_section.data_loader import load_index_symbols, load_price_panel
+from strategies.cross_section.screening import compute_ic_summary, screen_factors
 
 symbols = load_index_symbols()
 print(f'Universe: {len(symbols)} symbols')

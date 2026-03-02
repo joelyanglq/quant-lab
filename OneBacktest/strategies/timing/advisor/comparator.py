@@ -17,7 +17,7 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from advisor.signal_engine import SignalResult
+from strategies.timing.signals import SignalResult
 
 
 @dataclass

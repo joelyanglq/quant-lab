@@ -12,10 +12,10 @@
 
 用法:
     cd OneBacktest
-    python scripts/pick_stocks.py                  # 完整运行
-    python scripts/pick_stocks.py --no-1min        # 只用 1d 因子 (9 个)
-    python scripts/pick_stocks.py --top-n 20       # top 20
-    python scripts/pick_stocks.py --start 2023-01-01
+    python -m strategies.cross_section.pick_stocks                  # 完整运行
+    python -m strategies.cross_section.pick_stocks --no-1min        # 只用 1d 因子 (9 个)
+    python -m strategies.cross_section.pick_stocks --top-n 20       # top 20
+    python -m strategies.cross_section.pick_stocks --start 2023-01-01
 """
 import argparse
 import sys
@@ -28,11 +28,11 @@ import numpy as np
 import pandas as pd
 
 # ── 确保 OneBacktest 在 sys.path ──
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from data.prices import load_index_symbols, load_price_panel
 from data.storage.parquet import ParquetStorage
-from strategy.factors import (
+from strategies.cross_section.factors import (
     compute_technical_factors,
     compute_reversal_factors,
     compute_fundamental_factors,
@@ -47,7 +47,7 @@ from strategy.factors import (
     RTH_START, RTH_END,
 )
 
-BARS_1MIN_DIR = Path(__file__).resolve().parent.parent.parent / 'data' / 'processed' / 'bars_1min'
+BARS_1MIN_DIR = Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'processed' / 'bars_1min'
 
 # ═══════════════════════════════════════════════════════════════
 # 筛选后的 17 因子 (研报分组选优 + IC filter + correlation dedup)

@@ -11,19 +11,20 @@
 """
 import sys
 import os
+from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from data import ParquetStorage, HistoricFeed
 from backtest.engine import BacktestEngine
 from backtest.analytics import calc_metrics, print_report
-from strategy.examples.buy_and_hold import BuyAndHoldStrategy
-from strategy.examples.rsi_reversal import RSIReversalStrategy
-from strategy.examples.momentum_vol_sized import MomentumVolSizedStrategy
-from strategy.examples.hht_timing import HHTTimingStrategy
-from strategy.examples.qrs_timing import QRSTimingStrategy
+from benchmarks.buy_and_hold import BuyAndHoldStrategy
+from strategies.timing.rsi_strategy import RSIReversalStrategy
+from strategies.timing.momentum_vol_strategy import MomentumVolSizedStrategy
+from strategies.timing.hht_strategy import HHTTimingStrategy
+from strategies.timing.qrs_strategy import QRSTimingStrategy
 from strategy.portfolio import Portfolio
 from execution.handler import SimulatedExecutionHandler
 

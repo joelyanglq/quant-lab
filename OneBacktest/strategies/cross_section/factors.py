@@ -1,39 +1,39 @@
 """
-因子库 — 46 个因子统一定义
-=========================================
+因子库 — 46 个因子, 适配 event-driven 策略框架
+====================================================
 
-分类            因子名                        数据源   参考
+所有 compute_* 函数 **接受面板数据作为参数**, 不做数据加载。
+策略在 on_week_end / on_month_end 中从 self.history.panel() 取数后传入。
+
+用法:
+    from strategy.factors import compute_technical_factors, cross_sectional_zscore
+
+分类            因子名                        数据源
 ────────────────────────────────────────────────────────────
-技术(5)         RS_12M, RS_6M, Range_52W,     1d      经典动量
+技术(5)         RS_12M, RS_6M, Range_52W,     1d
                 RSI_28W, RSI_16W
-反转(4)         interday/intraday/overnight    1d      方正-球队硬币
+反转(4)         interday/intraday/overnight    1d
                 _rev_volflip, team_coin
-基本面(8)       ROE, ROIC, EV_EBITDA,         fund    Alpha Vantage
-                FCF_Yield, PS, FCF_Growth,
-                EPS_Score, Growth_Stability
-微观结构(3)     go_with_flow, lone_goose,     1min    方正-随波逐流
+基本面(8)       ROE, ROIC, EV_EBITDA, ...     fund
+微观结构(3)     go_with_flow, lone_goose,     1min+1d
                 sailing
-博弈(5)         vol_battle_ret/pos/battle,    1min    方正-多空博弈
+博弈(5)         vol_battle_ret/pos/battle,    1min
                 amp_battle, bull_bear_battle
-激增(3)         weekly_dazzling_vol/ret,      1min    方正-耀眼
+激增(3)         weekly_dazzling_vol/ret,      1min
                 moderate_risk
-回归(4)         morning_mist, noon_shade,     1min    方正-回归分析
+回归(4)         morning_mist, noon_shade,     1min
                 night_frost, flower_hidden
-模糊(3)         fuzzy_corr,                   1min    方正-模糊性
-                fuzzy_amount_ratio,
-                fuzzy_volume_ratio
-灾后重建(2)     disaster_rebuild,             1min    方正-灾后重建
+模糊(3)         fuzzy_corr, fuzzy_amount_     1min
+                ratio, fuzzy_volume_ratio
+灾后重建(2)     disaster_rebuild,             1min
                 peak_climbing
-潮汐(4)         full_tidal, strong_half,      1min    方正-潮汐
+潮汐(4)         full_tidal, strong_half,      1min
                 aggressive_weak_half,
                 stable_weak_half
-跳跃(5)         weekly_jump,                  1min+1d Jiang(2008)
+跳跃(5)         weekly_jump,                  1min+1d
                 modified_amplitude_1/2,
                 modified_amplitude,
                 moth_to_flame
-
-Usage:
-    from factor_research.factors import compute_technical_factors, ...
 """
 import datetime as _dt
 import warnings
@@ -42,19 +42,15 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Optional
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
-BARS_1MIN_DIR = _ROOT / 'data' / 'processed' / 'bars_1min'
-BARS_1D_DIR = _ROOT / 'data' / 'processed' / 'bars_1d'
-
 RTH_START = _dt.time(9, 35)
 RTH_END = _dt.time(15, 57)
 
 
 # ═════════════════════════════════════════════════════════════
-# 共用工具
+# 共用工具 (公开 API)
 # ═════════════════════════════════════════════════════════════
 
-def _cross_sectional_zscore(
+def cross_sectional_zscore(
     factor: pd.DataFrame,
     winsorize_sigma: float = 3.0,
 ) -> pd.DataFrame:
@@ -73,62 +69,7 @@ def _cross_sectional_zscore(
     return w.sub(mu, axis=0).div(sd.replace(0, np.nan), axis=0)
 
 
-def _load_1min_panels(
-    symbols: List[str],
-    start: str = '2025-04-03',
-    end: str = '2026-12-31',
-):
-    """加载 1min close+volume 并 pivot 成宽表 (minutes × symbols)"""
-    from data.storage.parquet import ParquetStorage
-
-    storage = ParquetStorage(str(BARS_1MIN_DIR))
-    print(f'  Loading 1min for {len(symbols)} symbols...', end='', flush=True)
-    raw = storage.load(symbols,
-                       pd.Timestamp(start, tz='US/Eastern'),
-                       pd.Timestamp(end, tz='US/Eastern'), '1m')
-    print(f' {len(raw):,} bars', flush=True)
-
-    t = raw.index.time
-    raw = raw[(t >= RTH_START) & (t <= RTH_END)]
-    print(f'  After RTH filter: {len(raw):,} bars', flush=True)
-
-    close_1m = raw.pivot_table(index=raw.index, columns='symbol', values='close')
-    volume_1m = raw.pivot_table(index=raw.index, columns='symbol', values='volume')
-    print(f'  Pivoted: {close_1m.shape[0]:,} minutes × {close_1m.shape[1]} symbols',
-          flush=True)
-    return close_1m, volume_1m
-
-
-def _load_1min_ohlcv(
-    symbols: List[str],
-    start: str = '2025-04-03',
-    end: str = '2026-12-31',
-) -> Dict[str, pd.DataFrame]:
-    """加载 1min OHLCV 并 pivot 成宽表"""
-    from data.storage.parquet import ParquetStorage
-
-    storage = ParquetStorage(str(BARS_1MIN_DIR))
-    print(f'  Loading 1min OHLCV for {len(symbols)} symbols...', end='', flush=True)
-    raw = storage.load(symbols,
-                       pd.Timestamp(start, tz='US/Eastern'),
-                       pd.Timestamp(end, tz='US/Eastern'), '1m')
-    print(f' {len(raw):,} bars', flush=True)
-
-    t = raw.index.time
-    raw = raw[(t >= RTH_START) & (t <= RTH_END)]
-    print(f'  After RTH filter: {len(raw):,} bars', flush=True)
-
-    panels = {}
-    for field in ['open', 'high', 'low', 'close', 'volume']:
-        panels[field] = raw.pivot_table(index=raw.index, columns='symbol', values=field)
-
-    n_rows = panels['close'].shape[0]
-    n_syms = panels['close'].shape[1]
-    print(f'  Pivoted: {n_rows:,} minutes × {n_syms} symbols', flush=True)
-    return panels
-
-
-def _rolling_mean_std_composite(
+def rolling_composite(
     daily_panel: pd.DataFrame,
     window: int = 5,
     negate: bool = False,
@@ -141,15 +82,15 @@ def _rolling_mean_std_composite(
     valid_rows = rolling_mean.notna().any(axis=1)
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', 'Mean of empty slice')
-        z_mean = _cross_sectional_zscore(rolling_mean.loc[valid_rows])
-        z_std = _cross_sectional_zscore(rolling_std.loc[valid_rows])
+        z_mean = cross_sectional_zscore(rolling_mean.loc[valid_rows])
+        z_std = cross_sectional_zscore(rolling_std.loc[valid_rows])
 
     composite = (z_mean + z_std) / 2
     result = -composite if negate else composite
     return result.reindex(daily_panel.index)
 
 
-def _rolling_mean_zscore(
+def rolling_mean_zscore(
     daily_panel: pd.DataFrame,
     window: int = 5,
 ) -> pd.DataFrame:
@@ -160,29 +101,29 @@ def _rolling_mean_zscore(
     valid_rows = rolling_mean.notna().any(axis=1)
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', 'Mean of empty slice')
-        result = _cross_sectional_zscore(rolling_mean.loc[valid_rows])
+        result = cross_sectional_zscore(rolling_mean.loc[valid_rows])
 
     return result.reindex(daily_panel.index)
 
 
-def _moderate_rolling_factor(
+def moderate_rolling(
     daily_panel: pd.DataFrame,
     window: int = 5,
     negate: bool = True,
 ) -> pd.DataFrame:
-    """适度化 + rolling mean+std → z-score 等权 (for surge factors)"""
+    """适度化 + rolling mean+std → z-score 等权"""
     cs_mean = daily_panel.mean(axis=1)
     moderate = daily_panel.sub(cs_mean, axis=0).abs()
 
     min_periods = max(window - 1, 3)
-    rolling_mean = moderate.rolling(window, min_periods=min_periods).mean()
-    rolling_std = moderate.rolling(window, min_periods=min_periods).std()
+    r_mean = moderate.rolling(window, min_periods=min_periods).mean()
+    r_std = moderate.rolling(window, min_periods=min_periods).std()
 
-    valid_rows = rolling_mean.notna().any(axis=1)
+    valid_rows = r_mean.notna().any(axis=1)
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', 'Mean of empty slice')
-        z_mean = _cross_sectional_zscore(rolling_mean.loc[valid_rows])
-        z_std = _cross_sectional_zscore(rolling_std.loc[valid_rows])
+        z_mean = cross_sectional_zscore(r_mean.loc[valid_rows])
+        z_std = cross_sectional_zscore(r_std.loc[valid_rows])
 
     composite = (z_mean + z_std) / 2
     result = -composite if negate else composite
@@ -191,6 +132,7 @@ def _moderate_rolling_factor(
 
 # ═════════════════════════════════════════════════════════════
 # 1. 技术因子 (5)  —  RS_12M, RS_6M, Range_52W, RSI_28W, RSI_16W
+#    入参: close, high, low (1d 面板)
 # ═════════════════════════════════════════════════════════════
 
 def _rsi(close: pd.DataFrame, period: int) -> pd.DataFrame:
@@ -208,15 +150,19 @@ def compute_technical_factors(
     high: pd.DataFrame,
     low: pd.DataFrame,
 ) -> Dict[str, pd.DataFrame]:
-    # RS 12M: 252日回报, 跳过最近21日
+    """
+    技术因子 (5): RS_12M, RS_6M, Range_52W, RSI_28W, RSI_16W.
+
+    Args:
+        close: 日线收盘面板 (dates × symbols)
+        high: 日线最高价面板
+        low: 日线最低价面板
+    """
     rs_12m = close.shift(21) / close.shift(252) - 1
-    # RS 6M
     rs_6m = close.shift(21) / close.shift(126) - 1
-    # 52W Range: (close - 52w_low) / (52w_high - 52w_low)
     high_252 = high.rolling(252, min_periods=126).max()
     low_252 = low.rolling(252, min_periods=126).min()
     range_52w = (close - low_252) / (high_252 - low_252).replace(0, np.nan)
-    # RSI
     rsi_28w = _rsi(close, 140)
     rsi_16w = _rsi(close, 80)
 
@@ -228,10 +174,10 @@ def compute_technical_factors(
 
 # ═════════════════════════════════════════════════════════════
 # 2. 反转因子 (4)  —  球队硬币
+#    入参: close, open_price (1d 面板)
 # ═════════════════════════════════════════════════════════════
 
 def _volatility_flip(daily_panel: pd.DataFrame, window: int = 20) -> pd.DataFrame:
-    """波动翻转: 低波动→取反, 高波动→不变"""
     rolling_mean = daily_panel.rolling(window, min_periods=15).mean()
     rolling_std = daily_panel.rolling(window, min_periods=15).std()
     cs_vol_mean = rolling_std.mean(axis=1)
@@ -245,6 +191,13 @@ def compute_reversal_factors(
     close: pd.DataFrame,
     open_price: pd.DataFrame,
 ) -> Dict[str, pd.DataFrame]:
+    """
+    反转因子 (4): interday/intraday/overnight_rev_volflip, team_coin.
+
+    Args:
+        close: 日线收盘面板
+        open_price: 日线开盘面板
+    """
     interday_ret = close / close.shift(1) - 1
     intraday_ret = close / open_price - 1
     overnight_ret = open_price / close.shift(1) - 1
@@ -254,25 +207,22 @@ def compute_reversal_factors(
     f2 = _volatility_flip(intraday_ret)
     f3 = _volatility_flip(overnight_dist)
 
-    z1 = _cross_sectional_zscore(f1)
-    z2 = _cross_sectional_zscore(f2)
-    z3 = _cross_sectional_zscore(f3)
+    z1 = cross_sectional_zscore(f1)
+    z2 = cross_sectional_zscore(f2)
+    z3 = cross_sectional_zscore(f3)
 
-    daily = {
+    return {
         'interday_rev_volflip': f1,
         'intraday_rev_volflip': f2,
         'overnight_rev_volflip': f3,
         'team_coin': (z1 + z2 + z3) / 3,
     }
-    for name, df in daily.items():
-        n_valid = df.iloc[-1].notna().sum() if len(df) > 0 else 0
-        print(f'  {name}: {df.shape[0]} days, coverage={n_valid}', flush=True)
-    return daily
 
 
 # ═════════════════════════════════════════════════════════════
-# 3. 基本面因子 (8)  —  ROE, ROIC, EV/EBITDA, FCF_Yield, PS,
+# 3. 基本面因子 (8)  —  ROE, ROIC, EV_EBITDA, FCF_Yield, PS,
 #                       FCF_Growth, EPS_Score, Growth_Stability
+#    入参: symbols, close (内部仍从磁盘读 quarterly 数据)
 # ═════════════════════════════════════════════════════════════
 
 FUNDAMENTAL_FIELDS = [
@@ -308,7 +258,7 @@ def _ols_slope_r2(x: np.ndarray, y: np.ndarray):
 
 
 def _prepare_quarterly(symbol: str):
-    from .data_loader import _load_single_fundamental, _fix_filing_dates
+    from data.fundamentals import _load_single_fundamental, _fix_filing_dates
     raw = _load_single_fundamental(symbol)
     if raw is None:
         return None
@@ -323,9 +273,7 @@ def _prepare_quarterly(symbol: str):
     return qtr
 
 
-def _rolling_ols_to_panel(
-    symbol, field, dates, output, mode='slope_r2', window=8,
-):
+def _rolling_ols_to_panel(symbol, field, dates, output, window=8):
     qtr = _prepare_quarterly(symbol)
     if qtr is None:
         return
@@ -380,7 +328,15 @@ def compute_fundamental_factors(
     symbols: List[str],
     close: pd.DataFrame,
 ) -> Dict[str, pd.DataFrame]:
-    from .data_loader import build_fundamental_panel
+    """
+    基本面因子 (8): ROE, ROIC, EV_EBITDA, FCF_Yield, PS,
+    FCF_Growth, EPS_Score, Growth_Stability.
+
+    Args:
+        symbols: 股票列表
+        close: 日线收盘面板 (内部从磁盘读 quarterly 数据)
+    """
+    from data.fundamentals import build_fundamental_panel
 
     dates = close.index
     panels = build_fundamental_panel(symbols, FUNDAMENTAL_FIELDS, dates)
@@ -399,40 +355,32 @@ def compute_fundamental_factors(
     op_cf = panels['cash_flow_statement__net_cash_flow_from_operating_activities']
     inv_cf = panels['cash_flow_statement__net_cash_flow_from_investing_activities']
 
-    # ROE
     roe = ni / equity.replace(0, np.nan)
 
-    # ROIC
     eff_tax = (tax / pretax.replace(0, np.nan)).clip(0, 0.5)
     nopat = op_inc * (1 - eff_tax)
     invested_capital = assets - cur_liab
     roic = nopat / invested_capital.replace(0, np.nan)
 
-    # EV/EBITDA (取负)
     mktcap = close * shares
     ev = mktcap + liabilities - cur_assets
     da_approx = (op_cf - ni).clip(lower=0)
     ebitda = op_inc + da_approx
     ev_ebitda = -(ev / ebitda.replace(0, np.nan))
 
-    # FCF Yield
     fcf = op_cf + inv_cf
     fcf_yield = fcf / mktcap.replace(0, np.nan)
 
-    # P/S (取负)
     ps = -(mktcap / revenue.replace(0, np.nan))
 
-    # FCF Growth
     fcf_lag = fcf.shift(252)
     fcf_growth = (fcf - fcf_lag) / fcf_lag.abs().replace(0, np.nan)
 
-    # EPS Score
     eps_score = pd.DataFrame(np.nan, index=dates, columns=symbols)
     for sym in symbols:
         _rolling_ols_to_panel(sym, 'income_statement__diluted_earnings_per_share',
                               dates, eps_score)
 
-    # Growth Stability
     growth_stab = pd.DataFrame(np.nan, index=dates, columns=symbols)
     for sym in symbols:
         _rolling_yoy_r2_to_panel(sym, 'income_statement__revenues',
@@ -447,10 +395,10 @@ def compute_fundamental_factors(
 
 # ═════════════════════════════════════════════════════════════
 # 4. 微观结构因子 (3)  —  随波逐流, 孤雁出群, 水中行舟
+#    入参: close_1m, volume_1m, close_daily, open_daily
 # ═════════════════════════════════════════════════════════════
 
 def _compute_daily_high_low_diff(close_1m, volume_1m, close_daily, open_daily):
-    """每日"高低额差": 高位成交额 vs 低位成交额的差异"""
     daily_intra_ret = close_daily / open_daily - 1
     reasonable_ret = daily_intra_ret.rolling(20, min_periods=15).mean()
     turnover_1m = close_1m * volume_1m
@@ -477,15 +425,10 @@ def _compute_daily_high_low_diff(close_1m, volume_1m, close_daily, open_daily):
         total_to = (high_to + low_to).replace(0, np.nan)
         results[dt_ts] = (high_to - low_to) / total_to
 
-        if (i + 1) % 20 == 0:
-            print(f'    high_low_diff: {i+1}/{len(dates)} days', flush=True)
-
-    print(f'    high_low_diff: {len(dates)}/{len(dates)} days', flush=True)
     return pd.DataFrame(results).T.sort_index()
 
 
 def _compute_daily_lone_goose(close_1m, volume_1m):
-    """每日"孤雁出群": 不分化时刻成交额相关性均值"""
     turnover_1m = close_1m * volume_1m
     dates = sorted(set(close_1m.index.date))
     results = {}
@@ -517,16 +460,11 @@ def _compute_daily_lone_goose(close_1m, volume_1m):
         mean_abs = (corr.abs().sum() - 1) / (n - 1)
         results[pd.Timestamp(dt)] = mean_abs
 
-        if (i + 1) % 20 == 0:
-            print(f'    lone_goose: {i+1}/{len(dates)} days', flush=True)
-
-    print(f'    lone_goose: {len(dates)}/{len(dates)} days', flush=True)
     df = pd.DataFrame(results).T.sort_index()
     return df.reindex(columns=close_1m.columns)
 
 
 def _factor_go_with_flow(high_low_diff, window=20):
-    """随波逐流: rolling pairwise Spearman |corr| 均值"""
     dates = high_low_diff.index
     results = {}
 
@@ -541,73 +479,50 @@ def _factor_go_with_flow(high_low_diff, window=20):
         mean_abs = (corr.abs().sum() - 1) / (n - 1)
         results[dates[i]] = mean_abs
 
-        done = i - window + 2
-        total = len(dates) - window + 1
-        if done % 10 == 0:
-            print(f'    go_with_flow: {done}/{total}', flush=True)
-
-    total = len(dates) - window + 1
-    print(f'    go_with_flow: {total}/{total}', flush=True)
     return pd.DataFrame(results).T.reindex(columns=high_low_diff.columns)
 
 
 def _factor_lone_goose(daily_lg, window=20):
-    """孤雁出群: rolling mean+std → z-score → 取负"""
     rolling_mean = daily_lg.rolling(window, min_periods=15).mean()
     rolling_std = daily_lg.rolling(window, min_periods=15).std()
-    z_mean = _cross_sectional_zscore(rolling_mean)
-    z_std = _cross_sectional_zscore(rolling_std)
+    z_mean = cross_sectional_zscore(rolling_mean)
+    z_std = cross_sectional_zscore(rolling_std)
     return -((z_mean + z_std) / 2)
 
 
 def compute_microstructure_factors(
-    symbols: List[str],
-    start: str = '2025-10-01',
-    end: str = '2026-12-31',
+    close_1m: pd.DataFrame,
+    volume_1m: pd.DataFrame,
+    close_daily: pd.DataFrame,
+    open_daily: pd.DataFrame,
 ) -> Dict[str, pd.DataFrame]:
-    from .data_loader import load_price_panel
+    """
+    微观结构因子 (3): go_with_flow, lone_goose, sailing.
 
-    print('Loading 1min data...', flush=True)
-    close_1m, volume_1m = _load_1min_panels(symbols, start, end)
-
-    print('\nLoading daily OHLC...', flush=True)
-    panels = load_price_panel(symbols, '2025-01-01', end)
-    close_daily = panels['close']
-    open_daily = panels['open']
-    print(f'  Daily: {close_daily.shape[0]} days × {close_daily.shape[1]} symbols')
-
-    print('\nComputing daily high-low diff...', flush=True)
+    Args:
+        close_1m: 1min 收盘面板 (minutes × symbols)
+        volume_1m: 1min 成交量面板
+        close_daily: 日线收盘面板
+        open_daily: 日线开盘面板
+    """
     hld = _compute_daily_high_low_diff(close_1m, volume_1m, close_daily, open_daily)
-    print(f'  Result: {hld.shape}')
-
-    print('\nComputing daily lone goose...', flush=True)
     dlg = _compute_daily_lone_goose(close_1m, volume_1m)
-    print(f'  Result: {dlg.shape}')
 
-    print('\nComputing go_with_flow (rolling Spearman corr)...', flush=True)
     gwf = _factor_go_with_flow(hld)
-    n = gwf.iloc[-1].notna().sum() if len(gwf) > 0 else 0
-    print(f'  go_with_flow: {gwf.shape}, coverage={n}')
-
-    print('\nComputing lone_goose (rolling mean+std, negated)...', flush=True)
     lg = _factor_lone_goose(dlg)
-    n = lg.iloc[-1].notna().sum() if len(lg) > 0 else 0
-    print(f'  lone_goose: {lg.shape}, coverage={n}')
 
-    print('\nComputing sailing (composite)...', flush=True)
     common_idx = gwf.index.intersection(lg.index)
     common_cols = gwf.columns.intersection(lg.columns)
-    z1 = _cross_sectional_zscore(gwf.loc[common_idx, common_cols])
-    z2 = _cross_sectional_zscore(lg.loc[common_idx, common_cols])
+    z1 = cross_sectional_zscore(gwf.loc[common_idx, common_cols])
+    z2 = cross_sectional_zscore(lg.loc[common_idx, common_cols])
     sail = (z1 + z2) / 2
-    n = sail.iloc[-1].notna().sum() if len(sail) > 0 else 0
-    print(f'  sailing: {sail.shape}, coverage={n}')
 
     return {'go_with_flow': gwf, 'lone_goose': lg, 'sailing': sail}
 
 
 # ═════════════════════════════════════════════════════════════
 # 5. 博弈因子 (5)  —  多空博弈
+#    入参: raw_1m (长表, 含 symbol/OHLCV 列, RTH 过滤后)
 # ═════════════════════════════════════════════════════════════
 
 def _cumsum_battle(values, sort_key):
@@ -632,8 +547,10 @@ def _compute_one_day_battle(close, high, low, volume):
 
     running_high = np.maximum.accumulate(close)
     running_low = np.minimum.accumulate(close)
-    pct_from_high = (close - running_high) / np.where(running_high != 0, running_high, np.nan)
-    pct_from_low = (close - running_low) / np.where(running_low != 0, running_low, np.nan)
+    pct_from_high = (close - running_high) / np.where(
+        running_high != 0, running_high, np.nan)
+    pct_from_low = (close - running_low) / np.where(
+        running_low != 0, running_low, np.nan)
     rel_pos = (pct_from_high + pct_from_low) / 2
 
     amplitude = (high - low) / np.where(close != 0, close, np.nan)
@@ -648,31 +565,6 @@ def _compute_one_day_battle(close, high, low, volume):
     )
 
 
-def _process_battle_batch(symbols_batch, start, end):
-    from data.storage.parquet import ParquetStorage
-
-    storage = ParquetStorage(str(BARS_1MIN_DIR))
-    try:
-        raw = storage.load(symbols_batch,
-                           pd.Timestamp(start, tz='US/Eastern'),
-                           pd.Timestamp(end, tz='US/Eastern'), '1m')
-    except FileNotFoundError:
-        return []
-
-    t = raw.index.time
-    raw = raw[(t >= RTH_START) & (t <= RTH_END)]
-    if raw.empty:
-        return []
-
-    results = []
-    for (sym, dt), grp in raw.groupby(['symbol', raw.index.date]):
-        r1, r2, r3 = _compute_one_day_battle(
-            grp['close'].values, grp['high'].values,
-            grp['low'].values, grp['volume'].values)
-        results.append((sym, pd.Timestamp(dt), r1, r2, r3))
-    return results
-
-
 def _mean_distance(panel):
     row_mean = panel.mean(axis=1)
     row_std = panel.std(axis=1)
@@ -685,83 +577,39 @@ def _aggregate_to_weekly(daily_panel, window=20):
     rolling_mean = md.rolling(window, min_periods=window // 2).mean()
     rolling_std = md.rolling(window, min_periods=window // 2).std()
     combined = (rolling_mean + rolling_std) / 2
-    # 保留日频输出; 周频对齐由 prepare_weekly 统一处理
-    return combined.dropna(how='all')
+    weekly = combined.resample('W-FRI').last()
+    return weekly.dropna(how='all')
 
 
 def compute_battle_factors(
-    symbols: Optional[List[str]] = None,
-    start: str = '2025-10-01',
-    end: str = '2026-12-31',
+    raw_1m: pd.DataFrame,
 ) -> Dict[str, pd.DataFrame]:
-    batch_size = 2000
+    """
+    博弈因子 (5): vol_battle_ret, vol_battle_pos, amp_battle,
+    vol_battle, bull_bear_battle.
 
-    if symbols is None:
-        print('Scanning all symbols in 1min data...', flush=True)
-        start_year = pd.Timestamp(start).year
-        end_year = pd.Timestamp(end).year
-        all_syms = set()
-        for f in sorted(BARS_1MIN_DIR.glob('*_1m.parquet')):
-            year = int(f.stem.split('_')[0])
-            if start_year <= year <= end_year:
-                df = pd.read_parquet(f, columns=['symbol'])
-                all_syms |= set(df['symbol'].unique())
-        symbols = sorted(all_syms)
-        print(f'  Found {len(symbols)} symbols', flush=True)
-
-    n_batches = (len(symbols) + batch_size - 1) // batch_size
-    use_batch = len(symbols) > batch_size
+    Args:
+        raw_1m: 1min 长表 (RTH 已过滤), 需含 symbol, close, high, low, volume 列.
+                index = DatetimeIndex.
+    """
     all_results = []
+    grouped = raw_1m.groupby(['symbol', raw_1m.index.date])
 
-    if use_batch:
-        print(f'Processing in {n_batches} batches of {batch_size}...', flush=True)
-        for i in range(n_batches):
-            batch = symbols[i * batch_size: (i + 1) * batch_size]
-            print(f'  Batch {i+1}/{n_batches}: {len(batch)} symbols...', end='', flush=True)
-            results = _process_battle_batch(batch, start, end)
-            print(f' {len(results)} groups', flush=True)
-            all_results.extend(results)
-    else:
-        from data.storage.parquet import ParquetStorage
-        storage = ParquetStorage(str(BARS_1MIN_DIR))
-        print(f'Loading 1min data for {len(symbols)} symbols...', flush=True)
-        raw = storage.load(symbols, pd.Timestamp(start, tz='US/Eastern'),
-                           pd.Timestamp(end, tz='US/Eastern'), '1m')
-        print(f'  Loaded {len(raw):,} bars', flush=True)
+    for (sym, dt), grp in grouped:
+        r1, r2, r3 = _compute_one_day_battle(
+            grp['close'].values, grp['high'].values,
+            grp['low'].values, grp['volume'].values)
+        all_results.append((sym, pd.Timestamp(dt), r1, r2, r3))
 
-        t = raw.index.time
-        raw = raw[(t >= RTH_START) & (t <= RTH_END)]
-        print(f'  After RTH filter: {len(raw):,} bars', flush=True)
-
-        grouped = raw.groupby(['symbol', raw.index.date])
-        total = len(grouped)
-        done = 0
-
-        for (sym, dt), grp in grouped:
-            r1, r2, r3 = _compute_one_day_battle(
-                grp['close'].values, grp['high'].values,
-                grp['low'].values, grp['volume'].values)
-            all_results.append((sym, pd.Timestamp(dt), r1, r2, r3))
-            done += 1
-            if done % 50000 == 0:
-                print(f'  Processed {done}/{total} groups...', flush=True)
-
-        print(f'  Done: {done} groups', flush=True)
-        del raw, grouped
-
-    print(f'Total groups: {len(all_results)}', flush=True)
-
-    res_df = pd.DataFrame(all_results, columns=['symbol', 'date', 'vb_ret', 'vb_pos', 'ab'])
-    del all_results
+    res_df = pd.DataFrame(all_results,
+                          columns=['symbol', 'date', 'vb_ret', 'vb_pos', 'ab'])
 
     vb_ret = res_df.pivot(index='date', columns='symbol', values='vb_ret')
     vb_pos = res_df.pivot(index='date', columns='symbol', values='vb_pos')
     ab_ret = res_df.pivot(index='date', columns='symbol', values='ab')
-    del res_df
 
     daily = {'vol_battle_ret': vb_ret, 'vol_battle_pos': vb_pos, 'amp_battle': ab_ret}
 
-    print('\nAggregating to weekly...', flush=True)
     weekly = {}
     weekly['vol_battle_ret'] = _aggregate_to_weekly(daily['vol_battle_ret'])
     weekly['vol_battle_pos'] = _aggregate_to_weekly(daily['vol_battle_pos'])
@@ -775,16 +623,12 @@ def compute_battle_factors(
     ab_z = _mean_distance(weekly['amp_battle'])
     weekly['bull_bear_battle'] = (vb_z + ab_z) / 2
 
-    for name, df in weekly.items():
-        n_valid = df.iloc[-1].notna().sum() if len(df) > 0 else 0
-        print(f'  {name}: {df.shape[0]} weeks × {df.shape[1]} symbols, '
-              f'latest coverage={n_valid}', flush=True)
-
     return weekly
 
 
 # ═════════════════════════════════════════════════════════════
 # 6. 激增因子 (3)  —  耀眼波动率, 耀眼收益率, 适度冒险
+#    入参: close_1m, volume_1m
 # ═════════════════════════════════════════════════════════════
 
 def _compute_daily_surge_metrics(close_1m, volume_1m):
@@ -847,11 +691,6 @@ def _compute_daily_surge_metrics(close_1m, volume_1m):
         dv_results[pd.Timestamp(dt)] = pd.Series(day_dv)
         dr_results[pd.Timestamp(dt)] = pd.Series(day_dr)
 
-        if (i + 1) % 20 == 0:
-            print(f'    surge_metrics: {i+1}/{len(dates)} days', flush=True)
-
-    print(f'    surge_metrics: {len(dates)}/{len(dates)} days', flush=True)
-
     cols = close_1m.columns
     daily_dv = pd.DataFrame(dv_results).T.sort_index().reindex(columns=cols)
     daily_dr = pd.DataFrame(dr_results).T.sort_index().reindex(columns=cols)
@@ -859,44 +698,35 @@ def _compute_daily_surge_metrics(close_1m, volume_1m):
 
 
 def compute_surge_factors(
-    symbols: List[str],
-    start: str = '2025-10-01',
-    end: str = '2026-12-31',
+    close_1m: pd.DataFrame,
+    volume_1m: pd.DataFrame,
 ) -> Dict[str, pd.DataFrame]:
-    print('Loading 1min data...', flush=True)
-    close_1m, volume_1m = _load_1min_panels(symbols, start, end)
+    """
+    激增因子 (3): weekly_dazzling_vol, weekly_dazzling_ret, moderate_risk.
 
-    print('\nComputing daily surge metrics...', flush=True)
+    Args:
+        close_1m: 1min 收盘面板
+        volume_1m: 1min 成交量面板
+    """
     daily_dv, daily_dr = _compute_daily_surge_metrics(close_1m, volume_1m)
-    print(f'  daily_dazzling_vol: {daily_dv.shape}')
-    print(f'  daily_dazzling_ret: {daily_dr.shape}')
 
-    print('\nComputing weekly_dazzling_vol (5d rolling)...', flush=True)
-    wdv = _moderate_rolling_factor(daily_dv, 5, negate=True)
-    n = wdv.iloc[-1].notna().sum() if len(wdv) > 0 else 0
-    print(f'  weekly_dazzling_vol: {wdv.shape}, coverage={n}')
+    wdv = moderate_rolling(daily_dv, 5, negate=True)
+    wdr = moderate_rolling(daily_dr, 5, negate=False)
 
-    print('\nComputing weekly_dazzling_ret (5d rolling)...', flush=True)
-    wdr = _moderate_rolling_factor(daily_dr, 5, negate=False)
-    n = wdr.iloc[-1].notna().sum() if len(wdr) > 0 else 0
-    print(f'  weekly_dazzling_ret: {wdr.shape}, coverage={n}')
-
-    print('\nComputing moderate_risk (composite)...', flush=True)
     common_idx = wdv.index.intersection(wdr.index)
     common_cols = wdv.columns.intersection(wdr.columns)
     valid_rows = (wdv.loc[common_idx, common_cols].notna().any(axis=1)
                   & wdr.loc[common_idx, common_cols].notna().any(axis=1))
-    z1 = _cross_sectional_zscore(wdv.loc[common_idx[valid_rows], common_cols])
-    z2 = _cross_sectional_zscore(wdr.loc[common_idx[valid_rows], common_cols])
+    z1 = cross_sectional_zscore(wdv.loc[common_idx[valid_rows], common_cols])
+    z2 = cross_sectional_zscore(wdr.loc[common_idx[valid_rows], common_cols])
     mr = ((z1 + z2) / 2).reindex(index=common_idx, columns=common_cols)
-    n = mr.iloc[-1].notna().sum() if len(mr) > 0 else 0
-    print(f'  moderate_risk: {mr.shape}, coverage={n}')
 
     return {'weekly_dazzling_vol': wdv, 'weekly_dazzling_ret': wdr, 'moderate_risk': mr}
 
 
 # ═════════════════════════════════════════════════════════════
 # 7. 回归因子 (4)  —  朝没晨雾, 午蔽古木, 夜眠霜路, 花隐林间
+#    入参: close_1m, volume_1m
 # ═════════════════════════════════════════════════════════════
 
 def _run_daily_ols(mr, vd):
@@ -976,11 +806,6 @@ def _compute_daily_regression(close_1m, volume_1m):
         fa_res[pd.Timestamp(dt)] = pd.Series(day_fa)
         ti_res[pd.Timestamp(dt)] = pd.Series(day_ti)
 
-        if (i + 1) % 20 == 0:
-            print(f'    regression: {i+1}/{len(dates)} days', flush=True)
-
-    print(f'    regression: {len(dates)}/{len(dates)} days', flush=True)
-
     cols = close_1m.columns
     return (
         pd.DataFrame(mm_res).T.sort_index().reindex(columns=cols),
@@ -991,7 +816,6 @@ def _compute_daily_regression(close_1m, volume_1m):
 
 
 def _factor_night_frost(daily_t_intercept, window=5):
-    """夜眠霜路: rolling pairwise |corr| of t_intercept"""
     dates = daily_t_intercept.index
     results = {}
 
@@ -1006,75 +830,54 @@ def _factor_night_frost(daily_t_intercept, window=5):
         mean_abs = (corr.abs().sum() - 1) / (n - 1)
         results[dates[i]] = mean_abs
 
-        done = i - window + 2
-        total = len(dates) - window + 1
-        if done % 20 == 0:
-            print(f'    night_frost: {done}/{total}', flush=True)
-
-    total = len(dates) - window + 1
-    print(f'    night_frost: {total}/{total}', flush=True)
     df = pd.DataFrame(results).T.sort_index()
     return df.reindex(columns=daily_t_intercept.columns)
 
 
 def _factor_noon_shade(daily_abs_ti, daily_F_all, window=5):
-    """午蔽古木: F-flip → rolling mean → z-score"""
     F_cs_mean = daily_F_all.mean(axis=1)
     is_low_F = daily_F_all.lt(F_cs_mean, axis=0)
 
     daily_noon = daily_abs_ti.copy()
     daily_noon[is_low_F] = -daily_noon[is_low_F]
 
-    return _rolling_mean_zscore(daily_noon, window)
+    return rolling_mean_zscore(daily_noon, window)
 
 
 def compute_regression_factors(
-    symbols: List[str],
-    start: str = '2025-10-01',
-    end: str = '2026-12-31',
+    close_1m: pd.DataFrame,
+    volume_1m: pd.DataFrame,
 ) -> Dict[str, pd.DataFrame]:
-    print('Loading 1min data...', flush=True)
-    close_1m, volume_1m = _load_1min_panels(symbols, start, end)
+    """
+    回归因子 (4): morning_mist, noon_shade, night_frost, flower_hidden.
 
-    print('\nRunning daily intraday regressions...', flush=True)
+    Args:
+        close_1m: 1min 收盘面板
+        volume_1m: 1min 成交量面板
+    """
     daily_mm, daily_abs_ti, daily_fa, daily_ti = _compute_daily_regression(
         close_1m, volume_1m)
-    print(f'  daily shapes: mm={daily_mm.shape}, abs_ti={daily_abs_ti.shape}, '
-          f'F={daily_fa.shape}, ti={daily_ti.shape}')
 
-    print('\nComputing morning_mist (5d mean of std(t1..t5))...', flush=True)
-    mm = _rolling_mean_zscore(daily_mm)
-    n = mm.iloc[-1].notna().sum() if len(mm) > 0 else 0
-    print(f'  morning_mist: {mm.shape}, coverage={n}')
-
-    print('\nComputing noon_shade (F-flip + 5d mean)...', flush=True)
+    mm = rolling_mean_zscore(daily_mm)
     ns = _factor_noon_shade(daily_abs_ti, daily_fa)
-    n = ns.iloc[-1].notna().sum() if len(ns) > 0 else 0
-    print(f'  noon_shade: {ns.shape}, coverage={n}')
-
-    print('\nComputing night_frost (pairwise |corr| of t_intercept)...', flush=True)
     nf = _factor_night_frost(daily_ti)
-    n = nf.iloc[-1].notna().sum() if len(nf) > 0 else 0
-    print(f'  night_frost: {nf.shape}, coverage={n}')
 
-    print('\nComputing flower_hidden (composite)...', flush=True)
     common_idx = mm.index.intersection(ns.index).intersection(nf.index)
     common_cols = mm.columns.intersection(ns.columns).intersection(nf.columns)
     valid_rows = (mm.loc[common_idx, common_cols].notna().any(axis=1)
                   & ns.loc[common_idx, common_cols].notna().any(axis=1)
                   & nf.loc[common_idx, common_cols].notna().any(axis=1))
-    z1 = _cross_sectional_zscore(mm.loc[common_idx[valid_rows], common_cols])
-    z2 = _cross_sectional_zscore(ns.loc[common_idx[valid_rows], common_cols])
-    z3 = _cross_sectional_zscore(nf.loc[common_idx[valid_rows], common_cols])
+    z1 = cross_sectional_zscore(mm.loc[common_idx[valid_rows], common_cols])
+    z2 = cross_sectional_zscore(ns.loc[common_idx[valid_rows], common_cols])
+    z3 = cross_sectional_zscore(nf.loc[common_idx[valid_rows], common_cols])
     fh = ((z1 + z2 + z3) / 3).reindex(index=common_idx, columns=common_cols)
-    n = fh.iloc[-1].notna().sum() if len(fh) > 0 else 0
-    print(f'  flower_hidden: {fh.shape}, coverage={n}')
 
     return {'morning_mist': mm, 'noon_shade': ns, 'night_frost': nf, 'flower_hidden': fh}
 
 
 # ═════════════════════════════════════════════════════════════
 # 8. 模糊性因子 (3)  —  模糊关联度, 模糊金额比, 模糊数量比
+#    入参: close_1m, volume_1m
 # ═════════════════════════════════════════════════════════════
 
 def _compute_daily_fuzzy_metrics(close_1m, volume_1m):
@@ -1134,11 +937,6 @@ def _compute_daily_fuzzy_metrics(close_1m, volume_1m):
         far_res[pd.Timestamp(dt)] = pd.Series(day_far)
         fvr_res[pd.Timestamp(dt)] = pd.Series(day_fvr)
 
-        if (i + 1) % 20 == 0:
-            print(f'    fuzzy_metrics: {i+1}/{len(dates)} days', flush=True)
-
-    print(f'    fuzzy_metrics: {len(dates)}/{len(dates)} days', flush=True)
-
     cols = close_1m.columns
     return (
         pd.DataFrame(fc_res).T.sort_index().reindex(columns=cols),
@@ -1148,39 +946,28 @@ def _compute_daily_fuzzy_metrics(close_1m, volume_1m):
 
 
 def compute_fuzzy_factors(
-    symbols: List[str],
-    start: str = '2025-10-01',
-    end: str = '2026-12-31',
+    close_1m: pd.DataFrame,
+    volume_1m: pd.DataFrame,
 ) -> Dict[str, pd.DataFrame]:
-    print('Loading 1min data...', flush=True)
-    close_1m, volume_1m = _load_1min_panels(symbols, start, end)
+    """
+    模糊性因子 (3): fuzzy_corr, fuzzy_amount_ratio, fuzzy_volume_ratio.
 
-    print('\nComputing daily fuzzy metrics...', flush=True)
+    Args:
+        close_1m: 1min 收盘面板
+        volume_1m: 1min 成交量面板
+    """
     daily_fc, daily_far, daily_fvr = _compute_daily_fuzzy_metrics(close_1m, volume_1m)
-    print(f'  daily_fuzzy_corr: {daily_fc.shape}')
-    print(f'  daily_fuzzy_amount_ratio: {daily_far.shape}')
-    print(f'  daily_fuzzy_volume_ratio: {daily_fvr.shape}')
 
-    print('\nComputing fuzzy_corr (5d rolling)...', flush=True)
-    fc = _rolling_mean_std_composite(daily_fc)
-    n = fc.iloc[-1].notna().sum() if len(fc) > 0 else 0
-    print(f'  fuzzy_corr: {fc.shape}, coverage={n}')
-
-    print('\nComputing fuzzy_amount_ratio (5d rolling)...', flush=True)
-    far = _rolling_mean_std_composite(daily_far)
-    n = far.iloc[-1].notna().sum() if len(far) > 0 else 0
-    print(f'  fuzzy_amount_ratio: {far.shape}, coverage={n}')
-
-    print('\nComputing fuzzy_volume_ratio (5d rolling)...', flush=True)
-    fvr = _rolling_mean_std_composite(daily_fvr)
-    n = fvr.iloc[-1].notna().sum() if len(fvr) > 0 else 0
-    print(f'  fuzzy_volume_ratio: {fvr.shape}, coverage={n}')
+    fc = rolling_composite(daily_fc)
+    far = rolling_composite(daily_far)
+    fvr = rolling_composite(daily_fvr)
 
     return {'fuzzy_corr': fc, 'fuzzy_amount_ratio': far, 'fuzzy_volume_ratio': fvr}
 
 
 # ═════════════════════════════════════════════════════════════
 # 9. 灾后重建因子 (2)  —  disaster_rebuild, peak_climbing
+#    入参: panels_1m (dict of 5 OHLCV 面板)
 # ═════════════════════════════════════════════════════════════
 
 def _compute_daily_rebuild_metrics(panels_1m):
@@ -1250,11 +1037,6 @@ def _compute_daily_rebuild_metrics(panels_1m):
         rebuild_res[pd.Timestamp(dt)] = pd.Series(day_rebuild)
         climb_res[pd.Timestamp(dt)] = pd.Series(day_climb)
 
-        if (i + 1) % 20 == 0:
-            print(f'    rebuild_metrics: {i+1}/{len(dates)} days', flush=True)
-
-    print(f'    rebuild_metrics: {len(dates)}/{len(dates)} days', flush=True)
-
     cols = close_1m.columns
     return (
         pd.DataFrame(rebuild_res).T.sort_index().reindex(columns=cols),
@@ -1263,33 +1045,26 @@ def _compute_daily_rebuild_metrics(panels_1m):
 
 
 def compute_rebuild_factors(
-    symbols: List[str],
-    start: str = '2025-10-01',
-    end: str = '2026-12-31',
+    panels_1m: Dict[str, pd.DataFrame],
 ) -> Dict[str, pd.DataFrame]:
-    print('Loading 1min OHLCV data...', flush=True)
-    panels_1m = _load_1min_ohlcv(symbols, start, end)
+    """
+    灾后重建因子 (2): disaster_rebuild, peak_climbing.
 
-    print('\nComputing daily rebuild metrics...', flush=True)
+    Args:
+        panels_1m: {'open': df, 'high': df, 'low': df, 'close': df, 'volume': df}
+                   1min OHLCV 宽表
+    """
     daily_rb, daily_cl = _compute_daily_rebuild_metrics(panels_1m)
-    print(f'  daily_rebuild: {daily_rb.shape}')
-    print(f'  daily_climb: {daily_cl.shape}')
 
-    print('\nComputing disaster_rebuild (5d rolling, negated)...', flush=True)
-    rb = _rolling_mean_std_composite(daily_rb, 5, negate=True)
-    n = rb.iloc[-1].notna().sum() if len(rb) > 0 else 0
-    print(f'  disaster_rebuild: {rb.shape}, coverage={n}')
-
-    print('\nComputing peak_climbing (5d rolling)...', flush=True)
-    cl = _rolling_mean_std_composite(daily_cl, 5, negate=False)
-    n = cl.iloc[-1].notna().sum() if len(cl) > 0 else 0
-    print(f'  peak_climbing: {cl.shape}, coverage={n}')
+    rb = rolling_composite(daily_rb, 5, negate=True)
+    cl = rolling_composite(daily_cl, 5, negate=False)
 
     return {'disaster_rebuild': rb, 'peak_climbing': cl}
 
 
 # ═════════════════════════════════════════════════════════════
 # 10. 潮汐因子 (4)  —  全潮汐, 强势半潮汐, 激进弱势, 稳定弱势
+#     入参: close_1m, volume_1m
 # ═════════════════════════════════════════════════════════════
 
 def _compute_daily_tidal_metrics(close_1m, volume_1m):
@@ -1369,11 +1144,6 @@ def _compute_daily_tidal_metrics(close_1m, volume_1m):
         strong_res[pd.Timestamp(dt)] = pd.Series(day_strong)
         weak_res[pd.Timestamp(dt)] = pd.Series(day_weak)
 
-        if (i + 1) % 20 == 0:
-            print(f'    tidal_metrics: {i+1}/{len(dates)} days', flush=True)
-
-    print(f'    tidal_metrics: {len(dates)}/{len(dates)} days', flush=True)
-
     cols = close_1m.columns
     return (
         pd.DataFrame(full_res).T.sort_index().reindex(columns=cols),
@@ -1383,45 +1153,31 @@ def _compute_daily_tidal_metrics(close_1m, volume_1m):
 
 
 def compute_tidal_factors(
-    symbols: List[str],
-    start: str = '2025-10-01',
-    end: str = '2026-12-31',
+    close_1m: pd.DataFrame,
+    volume_1m: pd.DataFrame,
 ) -> Dict[str, pd.DataFrame]:
-    print('Loading 1min data...', flush=True)
-    close_1m, volume_1m = _load_1min_panels(symbols, start, end)
+    """
+    潮汐因子 (4): full_tidal, strong_half_tidal, aggressive_weak_half,
+    stable_weak_half.
 
-    print('\nComputing daily tidal metrics...', flush=True)
+    Args:
+        close_1m: 1min 收盘面板
+        volume_1m: 1min 成交量面板
+    """
     daily_full, daily_strong, daily_weak = _compute_daily_tidal_metrics(
         close_1m, volume_1m)
-    print(f'  daily_full: {daily_full.shape}')
-    print(f'  daily_strong: {daily_strong.shape}')
-    print(f'  daily_weak: {daily_weak.shape}')
 
-    print('\nComputing full_tidal (5d rolling mean)...', flush=True)
-    ft = _rolling_mean_zscore(daily_full)
-    n = ft.iloc[-1].notna().sum() if len(ft) > 0 else 0
-    print(f'  full_tidal: {ft.shape}, coverage={n}')
+    ft = rolling_mean_zscore(daily_full)
+    sht = rolling_mean_zscore(daily_strong)
+    awh = rolling_mean_zscore(daily_weak)
 
-    print('\nComputing strong_half_tidal (5d rolling mean)...', flush=True)
-    sht = _rolling_mean_zscore(daily_strong)
-    n = sht.iloc[-1].notna().sum() if len(sht) > 0 else 0
-    print(f'  strong_half_tidal: {sht.shape}, coverage={n}')
-
-    print('\nComputing aggressive_weak_half (5d rolling mean)...', flush=True)
-    awh = _rolling_mean_zscore(daily_weak)
-    n = awh.iloc[-1].notna().sum() if len(awh) > 0 else 0
-    print(f'  aggressive_weak_half: {awh.shape}, coverage={n}')
-
-    print('\nComputing stable_weak_half (5d rolling std, negated)...', flush=True)
     min_p = max(5 - 1, 3)
     rolling_std = daily_weak.rolling(5, min_periods=min_p).std()
     valid_rows = rolling_std.notna().any(axis=1)
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', 'Mean of empty slice')
-        swh = -_cross_sectional_zscore(rolling_std.loc[valid_rows])
+        swh = -cross_sectional_zscore(rolling_std.loc[valid_rows])
     swh = swh.reindex(daily_weak.index)
-    n = swh.iloc[-1].notna().sum() if len(swh) > 0 else 0
-    print(f'  stable_weak_half: {swh.shape}, coverage={n}')
 
     return {
         'full_tidal': ft, 'strong_half_tidal': sht,
@@ -1431,10 +1187,10 @@ def compute_tidal_factors(
 
 # ═════════════════════════════════════════════════════════════
 # 11. 跳跃因子 (5)  —  周跳跃度, 修正振幅1/2, 修正振幅, 飞蛾扑火
+#     入参: close_1m, close_daily, high_daily, low_daily
 # ═════════════════════════════════════════════════════════════
 
 def _compute_daily_jump(close_1m):
-    """1min 泰勒残项 → 日均值"""
     dates = sorted(set(close_1m.index.date))
     jump_res = {}
 
@@ -1450,16 +1206,11 @@ def _compute_daily_jump(close_1m):
         taylor = 2 * (simple_ret - log_ret) - log_ret ** 2
         jump_res[pd.Timestamp(dt)] = taylor.mean()
 
-        if (i + 1) % 20 == 0:
-            print(f'    daily_jump: {i+1}/{len(dates)} days', flush=True)
-
-    print(f'    daily_jump: {len(dates)}/{len(dates)} days', flush=True)
     result = pd.DataFrame(jump_res).T.sort_index()
     return result.reindex(columns=close_1m.columns)
 
 
 def _compute_flipped_amplitude_1(daily_jump, daily_high, daily_low, daily_close):
-    """修正振幅1: 跳跃度翻转振幅"""
     prev_close = daily_close.shift(1)
     amplitude = (daily_high - daily_low) / prev_close
 
@@ -1478,7 +1229,6 @@ def _compute_flipped_amplitude_1(daily_jump, daily_high, daily_low, daily_close)
 
 
 def _compute_flipped_amplitude_2(daily_high, daily_low, daily_close):
-    """修正振幅2: low→high 泰勒残项翻转振幅"""
     prev_low = daily_low.shift(1)
     prev_close = daily_close.shift(1)
     amplitude = (daily_high - daily_low) / prev_close
@@ -1497,75 +1247,47 @@ def _compute_flipped_amplitude_2(daily_high, daily_low, daily_close):
 
 
 def compute_jump_factors(
-    symbols: List[str],
-    start: str = '2025-10-01',
-    end: str = '2026-12-31',
+    close_1m: pd.DataFrame,
+    close_daily: pd.DataFrame,
+    high_daily: pd.DataFrame,
+    low_daily: pd.DataFrame,
 ) -> Dict[str, pd.DataFrame]:
-    from .data_loader import load_price_panel
+    """
+    跳跃因子 (5): weekly_jump, modified_amplitude_1, modified_amplitude_2,
+    modified_amplitude, moth_to_flame.
 
-    print('Loading 1min data...', flush=True)
-    close_1m, _ = _load_1min_panels(symbols, start, end)
-
-    print('\nComputing daily jump degree (from 1min Taylor residual)...', flush=True)
+    Args:
+        close_1m: 1min 收盘面板
+        close_daily: 日线收盘面板
+        high_daily: 日线最高价面板
+        low_daily: 日线最低价面板
+    """
     daily_jump = _compute_daily_jump(close_1m)
-    print(f'  daily_jump: {daily_jump.shape}')
 
-    print('\nLoading daily OHLC...', flush=True)
-    panels_1d = load_price_panel(symbols, start, end)
-    daily_high = panels_1d['high']
-    daily_low = panels_1d['low']
-    daily_close = panels_1d['close']
-    print(f'  daily OHLC: {daily_close.shape}')
+    fa1 = _compute_flipped_amplitude_1(daily_jump, high_daily, low_daily, close_daily)
+    fa2 = _compute_flipped_amplitude_2(high_daily, low_daily, close_daily)
 
-    print('\nComputing flipped amplitude 1 (jump-based flip)...', flush=True)
-    fa1 = _compute_flipped_amplitude_1(daily_jump, daily_high, daily_low, daily_close)
-    print(f'  flipped_amp1: {fa1.shape}')
-
-    print('Computing flipped amplitude 2 (low→high Taylor flip)...', flush=True)
-    fa2 = _compute_flipped_amplitude_2(daily_high, daily_low, daily_close)
-    print(f'  flipped_amp2: {fa2.shape}')
-
-    # weekly_jump: rolling mean+std → z-score
-    print('\nComputing weekly_jump (5d rolling mean+std)...', flush=True)
-    wj = _rolling_mean_std_composite(daily_jump)
-    n = wj.iloc[-1].notna().sum() if len(wj) > 0 else 0
-    print(f'  weekly_jump: {wj.shape}, coverage={n}')
-
-    # modified_amplitude_1: rolling mean → z-score
-    print('\nComputing modified_amplitude_1 (5d rolling mean)...', flush=True)
-    ma1 = _rolling_mean_zscore(fa1)
-    n = ma1.iloc[-1].notna().sum() if len(ma1) > 0 else 0
-    print(f'  modified_amplitude_1: {ma1.shape}, coverage={n}')
-
-    # modified_amplitude_2: rolling mean → z-score
-    print('\nComputing modified_amplitude_2 (5d rolling mean)...', flush=True)
-    ma2 = _rolling_mean_zscore(fa2)
-    n = ma2.iloc[-1].notna().sum() if len(ma2) > 0 else 0
-    print(f'  modified_amplitude_2: {ma2.shape}, coverage={n}')
+    wj = rolling_composite(daily_jump)
+    ma1 = rolling_mean_zscore(fa1)
+    ma2 = rolling_mean_zscore(fa2)
 
     # modified_amplitude: z(ma1) + z(ma2) 等权
-    print('\nComputing modified_amplitude (composite)...', flush=True)
     common_idx = ma1.index.intersection(ma2.index)
     common_cols = ma1.columns.intersection(ma2.columns)
     valid_rows = (ma1.loc[common_idx, common_cols].notna().any(axis=1)
                   & ma2.loc[common_idx, common_cols].notna().any(axis=1))
-    z1 = _cross_sectional_zscore(ma1.loc[common_idx[valid_rows], common_cols])
-    z2 = _cross_sectional_zscore(ma2.loc[common_idx[valid_rows], common_cols])
+    z1 = cross_sectional_zscore(ma1.loc[common_idx[valid_rows], common_cols])
+    z2 = cross_sectional_zscore(ma2.loc[common_idx[valid_rows], common_cols])
     ma = ((z1 + z2) / 2).reindex(index=common_idx, columns=common_cols)
-    n = ma.iloc[-1].notna().sum() if len(ma) > 0 else 0
-    print(f'  modified_amplitude: {ma.shape}, coverage={n}')
 
     # moth_to_flame: z(weekly_jump) + z(modified_amplitude) 等权
-    print('\nComputing moth_to_flame (composite)...', flush=True)
     common_idx = wj.index.intersection(ma.index)
     common_cols = wj.columns.intersection(ma.columns)
     valid_rows = (wj.loc[common_idx, common_cols].notna().any(axis=1)
                   & ma.loc[common_idx, common_cols].notna().any(axis=1))
-    z1 = _cross_sectional_zscore(wj.loc[common_idx[valid_rows], common_cols])
-    z2 = _cross_sectional_zscore(ma.loc[common_idx[valid_rows], common_cols])
+    z1 = cross_sectional_zscore(wj.loc[common_idx[valid_rows], common_cols])
+    z2 = cross_sectional_zscore(ma.loc[common_idx[valid_rows], common_cols])
     mtf = ((z1 + z2) / 2).reindex(index=common_idx, columns=common_cols)
-    n = mtf.iloc[-1].notna().sum() if len(mtf) > 0 else 0
-    print(f'  moth_to_flame: {mtf.shape}, coverage={n}')
 
     return {
         'weekly_jump': wj,
@@ -1574,3 +1296,89 @@ def compute_jump_factors(
         'modified_amplitude': ma,
         'moth_to_flame': mtf,
     }
+
+
+# ═════════════════════════════════════════════════════════════
+# 一键全量: compute_all_factors
+# ═════════════════════════════════════════════════════════════
+
+def compute_all_factors(
+    history,
+    start_1min: Optional[str] = None,
+    end_1min: Optional[str] = None,
+    periods: int = 504,
+) -> Dict[str, pd.DataFrame]:
+    """
+    一键计算全部因子 (适配 event-driven 策略).
+
+    1d 因子从 history.panel() 获取 OHLCV;
+    1min 因子从 history 的 1min 方法加载 (如果配置了 storage_1min);
+    基本面因子仍从磁盘读 quarterly data.
+
+    Args:
+        history: HistoryManager 实例 (策略中为 self.history)
+        start_1min/end_1min: 1min 数据时间范围 (str), 需要时提供
+        periods: history.panel 回看天数
+
+    Returns:
+        dict: {factor_name: DataFrame (dates × symbols)}
+    """
+    # ── 1d 面板 ──
+    close = history.panel('close', periods)
+    high = history.panel('high', periods)
+    low = history.panel('low', periods)
+    open_p = history.panel('open', periods)
+    symbols = list(close.columns)
+
+    all_factors = {}
+
+    # 1. 技术因子
+    all_factors.update(compute_technical_factors(close, high, low))
+
+    # 2. 反转因子
+    all_factors.update(compute_reversal_factors(close, open_p))
+
+    # 3. 基本面因子
+    try:
+        all_factors.update(compute_fundamental_factors(symbols, close))
+    except Exception:
+        pass  # 缺少基本面数据时跳过
+
+    # ── 1min 因子 ──
+    if history._storage_1min is not None and start_1min and end_1min:
+        try:
+            close_1m, volume_1m = history.panel_1min(
+                'close', 'volume', start=start_1min, end=end_1min)
+
+            # 4. 微观结构
+            all_factors.update(compute_microstructure_factors(
+                close_1m, volume_1m, close, open_p))
+
+            # 6. 激增
+            all_factors.update(compute_surge_factors(close_1m, volume_1m))
+
+            # 7. 回归
+            all_factors.update(compute_regression_factors(close_1m, volume_1m))
+
+            # 8. 模糊
+            all_factors.update(compute_fuzzy_factors(close_1m, volume_1m))
+
+            # 10. 潮汐
+            all_factors.update(compute_tidal_factors(close_1m, volume_1m))
+
+            # 11. 跳跃
+            all_factors.update(compute_jump_factors(
+                close_1m, close, high, low))
+
+            # 5. 博弈 (需要长表)
+            raw_1m = history.raw_1min(start=start_1min, end=end_1min)
+            all_factors.update(compute_battle_factors(raw_1m))
+
+            # 9. 灾后重建 (需要 OHLCV)
+            panels_1m = history.ohlcv_1min(start=start_1min, end=end_1min)
+            all_factors.update(compute_rebuild_factors(panels_1m))
+
+        except Exception:
+            pass  # 缺少 1min 数据时跳过
+
+    return all_factors
