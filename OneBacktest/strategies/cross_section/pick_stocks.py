@@ -364,15 +364,15 @@ def main():
         print('ERROR: No valid scores.')
         return
 
-    # 过滤: 过去 5 日平均成交量 < 5M 的剔除
-    volume = prices['volume']
-    avg_vol_5d = volume.iloc[-5:].mean()
-    liquid = avg_vol_5d[avg_vol_5d >= 5_000_000].index
-    n_before = len(scored)
-    scored = scored.loc[scored.index.intersection(liquid)]
-    n_dropped = n_before - len(scored)
-    if n_dropped > 0:
-        print(f'  Filtered: {n_dropped} symbols with avg 5d volume < 5M')
+    # # 过滤: 过去 5 日平均成交量 < 5M 的剔除
+    # volume = prices['volume']
+    # avg_vol_5d = volume.iloc[-5:].mean()
+    # liquid = avg_vol_5d[avg_vol_5d >= 5_000_000].index
+    # n_before = len(scored)
+    # scored = scored.loc[scored.index.intersection(liquid)]
+    # n_dropped = n_before - len(scored)
+    # if n_dropped > 0:
+    #     print(f'  Filtered: {n_dropped} symbols with avg 5d volume < 5M')
 
     print_result(scored, factors_used, args.top_n)
 
