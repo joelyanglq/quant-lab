@@ -1,19 +1,18 @@
 """
-选股脚本 — 基于 17 个筛选因子 + 等权 z-score 打分
+选股脚本 — 基于 factor_registry.csv 中 active 因子 + 等权 z-score 打分
 
 流程:
-    1. 加载 S&P500 + NDX100 股票池, 读取 1d (+ 可选 1min) 数据
-    2. 计算 17 个筛选后因子
-    3. 按 IC 方向调整, 横截面 z-score 等权打分
-    4. 输出 top N 选股结果
-
-因子筛选结果来自 run_full_pipeline:
-    46 因子 → 研报分组选优 (22) → IC filter |IC|>=0.005 + corr dedup <0.7 → 17
+    1. 从 factor_registry.csv 读取 active 因子列表和方向
+    2. 加载 S&P500 + NDX100 股票池, 读取 1d (+ 可选 1min) 数据
+    3. 计算 style + alpha101 因子
+    4. 按 IC 方向调整, 横截面 z-score 等权打分
+    5. 输出 top N 选股结果
 
 用法:
     cd OneBacktest
     python -m strategies.cross_section.pick_stocks                  # 完整运行
-    python -m strategies.cross_section.pick_stocks --no-1min        # 只用 1d 因子 (9 个)
+    python -m strategies.cross_section.pick_stocks --no-1min        # 只用 1d 因子
+    python -m strategies.cross_section.pick_stocks --no-alpha101    # 只用 style 因子
     python -m strategies.cross_section.pick_stocks --top-n 20       # top 20
     python -m strategies.cross_section.pick_stocks --start 2023-01-01
 """
@@ -22,7 +21,7 @@ import sys
 import time
 import warnings
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -46,55 +45,57 @@ from strategies.cross_section.factors import (
     compute_rebuild_factors,
     RTH_START, RTH_END,
 )
+from strategies.cross_section.alpha101 import Alphas
 
-BARS_1MIN_DIR = Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'processed' / 'bars_1min'
+ROOT = Path(__file__).resolve().parent.parent.parent
+BARS_1MIN_DIR = ROOT.parent / 'data' / 'processed' / 'bars_1min'
+REGISTRY_PATH = ROOT / 'output' / 'factor_registry.csv'
+
 
 # ═══════════════════════════════════════════════════════════════
-# 筛选后的 17 因子 (研报分组选优 + IC filter + correlation dedup)
-#
-# direction: +1 表示 IC 为正 (值越大越好), -1 表示 IC 为负 (值越小越好)
+# 0. 从 factor_registry.csv 加载 active 因子
 # ═══════════════════════════════════════════════════════════════
 
-SELECTED_FACTORS = {
-    # ── 1d 因子 (9) ──
-    # Technical (2)
-    'RS_12M':                +1,   # IC=+0.038, ICIR=+0.29
-    'Range_52W':             +1,   # IC=+0.038, ICIR=+0.27
-    # Reversal (1) — 方正-球队硬币 best
-    'intraday_rev_volflip':  +1,   # IC=+0.021, ICIR=+0.26
-    # Fundamental (6)
-    'PS':                    +1,   # IC=+0.026, ICIR=+0.20
-    'EV_EBITDA':             +1,   # IC=+0.017, ICIR=+0.14
-    'EPS_Score':             +1,   # IC=+0.010, ICIR=+0.10
-    'FCF_Growth':            -1,   # IC=-0.006, ICIR=-0.06
-    'ROE':                   -1,   # IC=-0.011, ICIR=-0.14
-    'ROIC':                  -1,   # IC=-0.017, ICIR=-0.18
+def load_active_factors(
+    use_1min: bool = True,
+    use_alpha101: bool = True,
+) -> Tuple[Dict[str, int], Set[str], Set[str]]:
+    """
+    读取 factor_registry.csv, 返回 prod 因子信息.
 
-    # ── 1min 因子 (8) ──
-    # Regression — 方正-回归分析 best
-    'noon_shade':            +1,   # IC=+0.028, ICIR=+0.56
-    # Microstructure — 方正-随波逐流 best
-    'lone_goose':            +1,   # IC=+0.038, ICIR=+0.49
-    # Rebuild — 方正-灾后重建 best
-    'peak_climbing':         +1,   # IC=+0.033, ICIR=+0.43
-    # Jump — Jiang-跳跃 best
-    'modified_amplitude_2':  +1,   # IC=+0.040, ICIR=+0.40
-    # Surge — 方正-耀眼 best
-    'moderate_risk':         +1,   # IC=+0.019, ICIR=+0.23
-    # Battle — 方正-多空博弈 best
-    'vol_battle_pos':        +1,   # IC=+0.012, ICIR=+0.11
-    # Fuzzy — 方正-模糊性 best
-    'fuzzy_corr':            +1,   # IC=+0.006, ICIR=+0.08
-    # Tidal — 方正-潮汐 best
-    'full_tidal':            -1,   # IC=-0.026, ICIR=-0.27
-}
+    compute_key 从 formula_code_ref 最后一段提取:
+      "factors::compute_technical_factors::RS_12M" → "RS_12M"
+      "alpha101::Alphas::alpha_033"                → "alpha_033"
 
-# 1d-only 因子 (不需要 1min 数据)
-_1D_FACTORS = {
-    'RS_12M', 'Range_52W',
-    'intraday_rev_volflip',
-    'PS', 'EV_EBITDA', 'EPS_Score', 'FCF_Growth', 'ROE', 'ROIC',
-}
+    Returns:
+        selected_factors: {compute_key: direction} 全部 prod 因子
+        factors_1d:       1d-only 因子 compute_key 集合 (input_data != 'price_1min')
+        factors_alpha101: alpha101 因子 compute_key 集合
+    """
+    df = pd.read_csv(REGISTRY_PATH, encoding='utf-8-sig')
+    prod = df[df['status'] == 'prod'].copy()
+
+    if not use_alpha101:
+        prod = prod[~prod['factor_id'].str.startswith('CS_A101_')]
+    if not use_1min:
+        prod = prod[prod['input_data'] != 'price_1min']
+
+    selected_factors = {}
+    factors_1d = set()
+    factors_alpha101 = set()
+
+    for _, row in prod.iterrows():
+        ref = row['formula_code_ref']
+        compute_key = ref.split('::')[-1]
+        direction = int(row['direction'])
+        selected_factors[compute_key] = direction
+
+        if row['input_data'] != 'price_1min':
+            factors_1d.add(compute_key)
+        if row['factor_id'].startswith('CS_A101_'):
+            factors_alpha101.add(compute_key)
+
+    return selected_factors, factors_1d, factors_alpha101
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -107,6 +108,10 @@ def compute_selected_factors(
     high: pd.DataFrame,
     low: pd.DataFrame,
     open_p: pd.DataFrame,
+    volume: pd.DataFrame,
+    selected_factors: Dict[str, int],
+    factors_1d: Set[str],
+    factors_alpha101: Set[str],
     storage_1min=None,
     start_1min: str = None,
     end_1min: str = None,
@@ -114,8 +119,9 @@ def compute_selected_factors(
 ) -> Dict[str, pd.DataFrame]:
     """计算筛选后的因子, 返回 {name: DataFrame(dates x symbols)}."""
     all_factors = {}
+    target_names = set(selected_factors.keys())
 
-    # ── 1d 因子 ──
+    # ── Style 1d 因子 ──
     print('  Computing technical factors ...', end=' ')
     t0 = time.time()
     all_factors.update(compute_technical_factors(close, high, low))
@@ -135,7 +141,27 @@ def compute_selected_factors(
     else:
         print(f'{time.time()-t0:.1f}s')
 
-    # ── 1min 因子 ──
+    # ── Alpha101 因子 ──
+    if factors_alpha101:
+        print(f'  Computing alpha101 ({len(factors_alpha101)} factors) ...', end=' ')
+        t0 = time.time()
+        try:
+            alphas_obj = Alphas(close, open_p, high, low, volume)
+            for fid in factors_alpha101:
+                # factor_id 格式: alpha_033 → 方法名: alpha_033
+                method = getattr(alphas_obj, fid, None)
+                if method is None:
+                    print(f'\n    {fid}: method not found', end='')
+                    continue
+                val = method()
+                if val is not None and isinstance(val, pd.DataFrame) and not val.empty:
+                    val = val.replace([np.inf, -np.inf], np.nan)
+                    all_factors[fid] = val
+            print(f'{time.time()-t0:.1f}s')
+        except Exception as e:
+            print(f'SKIP ({e})')
+
+    # ── Style 1min 因子 ──
     if use_1min and storage_1min is not None and start_1min and end_1min:
         print(f'  Loading 1min data [{start_1min} ~ {end_1min}] ...', end=' ')
         t0 = time.time()
@@ -184,11 +210,8 @@ def compute_selected_factors(
             except Exception as e:
                 print(f'SKIP ({e})')
 
-    # 只保留筛选后的因子
-    selected_names = set(SELECTED_FACTORS.keys())
-    if not use_1min:
-        selected_names = selected_names & _1D_FACTORS
-    computed = {k: v for k, v in all_factors.items() if k in selected_names}
+    # 只保留 registry 中 active 的因子
+    computed = {k: v for k, v in all_factors.items() if k in target_names}
     return computed
 
 
@@ -198,6 +221,7 @@ def compute_selected_factors(
 
 def score_stocks(
     factors: Dict[str, pd.DataFrame],
+    selected_factors: Dict[str, int],
 ) -> pd.DataFrame:
     """
     取每个因子最新值, 按 IC 方向调整, MAD winsorize + z-score 等权打分.
@@ -219,7 +243,7 @@ def score_stocks(
 
     # MAD winsorize + z-score (横截面), 按 IC 方向调整符号
     for col in df.columns:
-        direction = SELECTED_FACTORS.get(col, +1)
+        direction = selected_factors.get(col, +1)
         s = df[col]
         median = s.median()
         mad = (s - median).abs().median()
@@ -245,35 +269,36 @@ def score_stocks(
 def print_result(
     scored: pd.DataFrame,
     factors_used: List[str],
+    selected_factors: Dict[str, int],
     top_n: int = 10,
 ):
     today = pd.Timestamp.now().strftime('%Y-%m-%d')
     n_universe = len(scored)
     n_factors = len(factors_used)
 
+    n_total = len(selected_factors)
+
     print()
     print('=' * 64)
     print(f'  Stock Selection - {today}')
     print(f'  Universe: {n_universe} symbols | '
-          f'Factors: {n_factors}/17 used')
+          f'Factors: {n_factors}/{n_total} used')
     print('=' * 64)
     print()
 
     top = scored.head(top_n)
 
-    # 展示 top 5 因子 (按 |ICIR| 排序)
-    icir_order = sorted(factors_used,
-                        key=lambda f: abs(SELECTED_FACTORS.get(f, 0)),
-                        reverse=True)[:5]
+    # 展示 top 5 因子 (按 |direction| 排序 — 都是 1, 所以按名称)
+    display_cols = factors_used[:5]
     header = f'  {"Rank":>4}  {"Symbol":<6}  {"Score":>7}'
-    for f in icir_order:
+    for f in display_cols:
         header += f'  {f[:12]:>12}'
     print(header)
     print('  ' + '-' * (len(header) - 2))
 
     for i, (sym, row) in enumerate(top.iterrows(), 1):
         line = f'  {i:>4}  {sym:<6}  {row["score"]:>+7.3f}'
-        for f in icir_order:
+        for f in display_cols:
             val = row.get(f, np.nan)
             if pd.isna(val):
                 line += f'  {"N/A":>12}'
@@ -283,7 +308,7 @@ def print_result(
 
     # 因子摘要
     print()
-    missing = set(SELECTED_FACTORS.keys()) - set(factors_used)
+    missing = set(selected_factors.keys()) - set(factors_used)
     if missing:
         print(f'  Missing factors ({len(missing)}): {", ".join(sorted(missing))}')
     print()
@@ -294,23 +319,37 @@ def print_result(
 # ═══════════════════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser(description='Multi-factor stock selection (17 screened factors)')
+    parser = argparse.ArgumentParser(description='Multi-factor stock selection (registry-driven)')
     parser.add_argument('--top-n', type=int, default=10, help='Number of top picks')
     parser.add_argument('--start', type=str, default='2023-01-01',
                         help='History start date for 1d data')
     parser.add_argument('--no-1min', action='store_true',
-                        help='Skip 1min factors (use 9 daily factors only)')
+                        help='Skip 1min factors (use daily factors only)')
+    parser.add_argument('--no-alpha101', action='store_true',
+                        help='Skip alpha101 factors (use style factors only)')
     parser.add_argument('--start-1min', type=str, default=None,
-                        help='1min data start (default: 4 months ago)')
+                        help='1min data start (default: use full 1d range)')
     args = parser.parse_args()
 
     warnings.filterwarnings('ignore', 'Mean of empty slice')
     warnings.filterwarnings('ignore', category=RuntimeWarning)
 
     use_1min = not args.no_1min
+    use_alpha101 = not args.no_alpha101
+
+    # ── 0. 加载因子注册表 ──
+    print('[0/3] Loading factor registry ...')
+    if not REGISTRY_PATH.exists():
+        print(f'ERROR: {REGISTRY_PATH} not found.')
+        return
+    selected_factors, factors_1d, factors_alpha101 = load_active_factors(
+        use_1min=use_1min, use_alpha101=use_alpha101)
+    print(f'  Active factors: {len(selected_factors)} '
+          f'(style: {len(selected_factors) - len(factors_alpha101)}, '
+          f'alpha101: {len(factors_alpha101)})')
 
     # ── 1. 加载数据 ──
-    print('[1/3] Loading data ...')
+    print('\n[1/3] Loading data ...')
     symbols = load_index_symbols()
     print(f'  Universe: {len(symbols)} symbols')
 
@@ -320,6 +359,7 @@ def main():
     high = prices['high']
     low = prices['low']
     open_p = prices['open']
+    volume = prices['volume']
     print(f'  1d bars: {close.shape[0]} days x {close.shape[1]} symbols  ({time.time()-t0:.1f}s)')
 
     # 1min storage
@@ -329,9 +369,7 @@ def main():
     if use_1min and BARS_1MIN_DIR.exists():
         storage_1min = ParquetStorage(str(BARS_1MIN_DIR))
         if start_1min is None:
-            # 使用已加载的 1d 数据中最早的时间作为 start_1min
             start_1min = close.index[0].strftime('%Y-%m-%d')
-        # 使用已加载的 1d 数据中最晚的时间作为 end_1min
         end_1min = close.index[-1].strftime('%Y-%m-%d')
         print(f'  1min range: {start_1min} ~ {end_1min}')
     elif use_1min:
@@ -342,14 +380,12 @@ def main():
     print('\n[2/3] Computing factors ...')
     t0 = time.time()
     factors = compute_selected_factors(
-        symbols, close, high, low, open_p,
+        symbols, close, high, low, open_p, volume,
+        selected_factors, factors_1d, factors_alpha101,
         storage_1min, start_1min, end_1min, use_1min)
 
     factors_used = list(factors.keys())
-    expected = set(SELECTED_FACTORS.keys())
-    if not use_1min:
-        expected = expected & _1D_FACTORS
-    n_expected = len(expected)
+    n_expected = len(selected_factors)
     print(f'  Computed: {len(factors_used)}/{n_expected} factors  ({time.time()-t0:.1f}s)')
 
     if not factors_used:
@@ -358,23 +394,13 @@ def main():
 
     # ── 3. 打分 & 排名 ──
     print('\n[3/3] Scoring ...')
-    scored = score_stocks(factors)
+    scored = score_stocks(factors, selected_factors)
 
     if scored.empty:
         print('ERROR: No valid scores.')
         return
 
-    # # 过滤: 过去 5 日平均成交量 < 5M 的剔除
-    # volume = prices['volume']
-    # avg_vol_5d = volume.iloc[-5:].mean()
-    # liquid = avg_vol_5d[avg_vol_5d >= 5_000_000].index
-    # n_before = len(scored)
-    # scored = scored.loc[scored.index.intersection(liquid)]
-    # n_dropped = n_before - len(scored)
-    # if n_dropped > 0:
-    #     print(f'  Filtered: {n_dropped} symbols with avg 5d volume < 5M')
-
-    print_result(scored, factors_used, args.top_n)
+    print_result(scored, factors_used, selected_factors, args.top_n)
 
 
 if __name__ == '__main__':

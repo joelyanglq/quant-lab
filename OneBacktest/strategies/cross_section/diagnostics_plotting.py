@@ -215,36 +215,73 @@ def plot_sub_sample_decomposition(
     report: AlphaTestReport,
     save_path: Optional[str] = None,
 ):
-    """子样本分解柱状图: IC / ICIR / L-S Sharpe by regime"""
+    """子样本分解: 逐年 IC 柱状图 + regime 柱状图"""
     ss = report.sub_sample
-    if ss is None or ss.regime_stats.empty:
+    if ss is None:
         return
 
-    rs = ss.regime_stats
-    regimes = rs.index.tolist()
-    n = len(regimes)
+    has_yearly = ss.yearly_stats is not None and not ss.yearly_stats.empty
+    has_regime = not ss.regime_stats.empty
 
-    fig, axes = plt.subplots(1, 3, figsize=(14, 5))
+    if not has_yearly and not has_regime:
+        return
+
+    n_rows = (1 if has_yearly else 0) + (1 if has_regime else 0)
+    fig, all_axes = plt.subplots(n_rows, 3, figsize=(14, 5 * n_rows))
     fig.suptitle(f'{report.factor_name} Sub-sample Analysis', fontsize=14, fontweight='bold')
 
-    metrics = [
-        ('mean_ic', 'Mean IC'),
-        ('icir', 'ICIR'),
-        ('ls_sharpe', 'L/S Sharpe'),
-    ]
-    palette = plt.cm.Set2(np.linspace(0, 1, max(n, 2)))
+    if n_rows == 1:
+        all_axes = all_axes.reshape(1, -1)
 
-    for ax, (col, label) in zip(axes, metrics):
-        vals = [rs.loc[r, col] for r in regimes]
-        bars = ax.bar(regimes, vals, color=palette[:n], edgecolor='gray', alpha=0.8)
-        ax.axhline(0, color='gray', linestyle='-', alpha=0.5)
-        ax.set_title(label)
-        ax.set_ylabel(label)
-        for bar, val in zip(bars, vals):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                    f'{val:.3f}', ha='center',
-                    va='bottom' if val >= 0 else 'top', fontsize=9)
-        ax.grid(True, alpha=0.3, axis='y')
+    row_idx = 0
+
+    # ── 逐年分解 ──
+    if has_yearly:
+        ys = ss.yearly_stats
+        years = [str(y) for y in ys.index]
+        n_yr = len(years)
+        colors_yr = ['steelblue'] * n_yr
+
+        for ax, (col, label) in zip(all_axes[row_idx], [
+            ('mean_ic', 'Mean IC by Year'),
+            ('icir', 'ICIR by Year'),
+            ('ls_sharpe', 'L/S Sharpe by Year'),
+        ]):
+            vals = ys[col].values
+            bars = ax.bar(years, vals, color=colors_yr, edgecolor='gray', alpha=0.8)
+            ax.axhline(0, color='gray', linestyle='-', alpha=0.5)
+            # highlight negative bars
+            for bar, val in zip(bars, vals):
+                if val < 0:
+                    bar.set_color('salmon')
+                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                        f'{val:.3f}', ha='center',
+                        va='bottom' if val >= 0 else 'top', fontsize=8)
+            ax.set_title(label)
+            ax.grid(True, alpha=0.3, axis='y')
+        row_idx += 1
+
+    # ── Regime 分解 ──
+    if has_regime:
+        rs = ss.regime_stats
+        regimes = rs.index.tolist()
+        n = len(regimes)
+        palette = plt.cm.Set2(np.linspace(0, 1, max(n, 2)))
+
+        for ax, (col, label) in zip(all_axes[row_idx], [
+            ('mean_ic', 'Mean IC by Regime'),
+            ('icir', 'ICIR by Regime'),
+            ('ls_sharpe', 'L/S Sharpe by Regime'),
+        ]):
+            vals = [rs.loc[r, col] for r in regimes]
+            bars = ax.bar(regimes, vals, color=palette[:n], edgecolor='gray', alpha=0.8)
+            ax.axhline(0, color='gray', linestyle='-', alpha=0.5)
+            for bar, val in zip(bars, vals):
+                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                        f'{val:.3f}', ha='center',
+                        va='bottom' if val >= 0 else 'top', fontsize=9)
+            ax.set_title(label)
+            ax.grid(True, alpha=0.3, axis='y')
 
     plt.tight_layout()
     if save_path:

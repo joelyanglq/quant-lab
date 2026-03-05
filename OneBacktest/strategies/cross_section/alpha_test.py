@@ -70,6 +70,7 @@ class SubSampleAnalysis:
     regime_labels: pd.Series       # dates → regime label
     regime_stats: pd.DataFrame     # index=regime, columns=[mean_ic, icir, ls_sharpe, n_periods]
     oos_stats: Optional[Dict]      # 走样本外 IC/ICIR
+    yearly_stats: Optional[pd.DataFrame] = None  # index=year, columns=[mean_ic, icir, ls_sharpe, n_periods]
 
 
 @dataclass
@@ -611,6 +612,41 @@ def walk_forward_split(
     return result
 
 
+def compute_yearly_stats(
+    ic_series: pd.Series,
+    ls_returns: pd.Series,
+    ann_factor: int = 12,
+) -> pd.DataFrame:
+    """
+    逐年分解: 每年 IC / ICIR / L-S Sharpe.
+    """
+    years = ic_series.index.year
+    records = []
+    for yr in sorted(years.unique()):
+        mask = years == yr
+        ic_sub = ic_series[mask]
+        ls_sub = ls_returns.reindex(ic_sub.index).dropna()
+        n = len(ic_sub)
+        if n < 3:
+            continue
+        m_ic = float(ic_sub.mean())
+        ic_std = ic_sub.std()
+        m_icir = m_ic / ic_std if ic_std > 0 else 0.0
+        ls_ann = ls_sub.mean() * ann_factor
+        ls_vol = ls_sub.std() * np.sqrt(ann_factor)
+        ls_sharpe = ls_ann / ls_vol if ls_vol > 0 else 0.0
+        records.append({
+            'year': yr,
+            'mean_ic': m_ic,
+            'icir': m_icir,
+            'ls_sharpe': ls_sharpe,
+            'n_periods': n,
+        })
+    if not records:
+        return pd.DataFrame(columns=['mean_ic', 'icir', 'ls_sharpe', 'n_periods'])
+    return pd.DataFrame(records).set_index('year')
+
+
 def run_sub_sample_analysis(
     factor: pd.DataFrame,
     close: pd.DataFrame,
@@ -620,11 +656,14 @@ def run_sub_sample_analysis(
     train_pct: float = 0.7,
 ) -> SubSampleAnalysis:
     """
-    完整子样本分析: regime 分解 + 走样本外.
+    完整子样本分析: 逐年分解 + regime 分解 + 走样本外.
     """
     ic_series = backtest_result['ic_series']
     ls_returns = backtest_result['long_short']
     ann_factor = _infer_ann_factor(ic_series.index)
+
+    # 逐年分解
+    yearly_stats = compute_yearly_stats(ic_series, ls_returns, ann_factor)
 
     # Regime 分类
     if spy_close is None:
@@ -647,6 +686,7 @@ def run_sub_sample_analysis(
         regime_labels=regime_labels,
         regime_stats=regime_stats,
         oos_stats=oos_stats,
+        yearly_stats=yearly_stats,
     )
 
 
@@ -798,15 +838,27 @@ def format_alpha_test_report(report: AlphaTestReport) -> str:
         lines.append(f"  Avg R²: {fm.r2_series.mean():.4f}")
 
     # 子样本
-    if report.sub_sample is not None and not report.sub_sample.regime_stats.empty:
-        lines.append(f"\n子样本分析:")
-        rs = report.sub_sample.regime_stats
-        for regime in rs.index:
-            row = rs.loc[regime]
-            lines.append(f"  {regime}: IC={row['mean_ic']:+.4f}, "
-                         f"ICIR={row['icir']:.2f}, "
-                         f"L/S Sharpe={row['ls_sharpe']:.2f} "
-                         f"(n={int(row['n_periods'])})")
+    if report.sub_sample is not None:
+        # 逐年分解
+        ys = report.sub_sample.yearly_stats
+        if ys is not None and not ys.empty:
+            lines.append(f"\n逐年分解:")
+            lines.append(f"  {'Year':<6s} {'IC':>8s} {'ICIR':>7s} {'L/S Shrp':>9s} {'n':>5s}")
+            for yr in ys.index:
+                row = ys.loc[yr]
+                lines.append(f"  {yr:<6d} {row['mean_ic']:>+8.4f} {row['icir']:>7.2f} "
+                             f"{row['ls_sharpe']:>9.2f} {int(row['n_periods']):>5d}")
+
+        # Regime 分解
+        if not report.sub_sample.regime_stats.empty:
+            lines.append(f"\nRegime 分解:")
+            rs = report.sub_sample.regime_stats
+            for regime in rs.index:
+                row = rs.loc[regime]
+                lines.append(f"  {regime}: IC={row['mean_ic']:+.4f}, "
+                             f"ICIR={row['icir']:.2f}, "
+                             f"L/S Sharpe={row['ls_sharpe']:.2f} "
+                             f"(n={int(row['n_periods'])})")
 
         # 走样本外
         oos = report.sub_sample.oos_stats
