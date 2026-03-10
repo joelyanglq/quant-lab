@@ -30,6 +30,7 @@ from .feed import DataFeed
 from .sources.historic import HistoricFeed
 from .storage.parquet import ParquetStorage
 from .history import HistoryManager
+from .context import DataContext
 from .fundamentals import build_fundamental_panel, build_shares_panel, build_quarterly_series
 from .prices import load_price_panel, load_index_symbols
 
@@ -44,6 +45,7 @@ __all__ = [
     'build_fundamental_panel',
     'build_shares_panel',
     'build_quarterly_series',
+    'DataContext',
     'load_price_panel',
     'load_index_symbols',
 ]

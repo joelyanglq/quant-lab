@@ -24,7 +24,8 @@ class BacktestEngine:
     def __init__(self, data_feed, strategy, portfolio, execution_handler,
                  latest_prices: Dict[str, Bar] = None,
                  history_lookback: int = 504,
-                 storage_1min=None):
+                 storage_1min=None,
+                 data_context=None):
         self.data_feed = data_feed
         self.strategy = strategy
         self.portfolio = portfolio
@@ -46,6 +47,10 @@ class BacktestEngine:
         history = HistoryManager(portfolio.symbols, history_lookback, storage_1min)
         self.history = history
         self.strategy.history = history
+
+        # DataContext: 策略通过 self.data 访问 (v2, 可选)
+        if data_context is not None:
+            self.strategy.data = data_context
 
     def run_backtest(self):
         print("Starting Backtest...")

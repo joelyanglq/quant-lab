@@ -4,13 +4,12 @@
 1. BuyAndHold      - 基准
 2. RSI Reversal    - RSI 均值回归
 3. Momentum+Vol    - 动量 + 波动率配仓
-4. HHT Timing      - Hilbert 变换择时
-5. QRS Timing      - 阻力支撑择时
+4. HHT Timing      - Hilbert 变换择时 (forecast → CompositeStrategy)
+5. QRS Timing      - 阻力支撑择时 (forecast → CompositeStrategy)
 
 执行模式: T 日信号 → T+1 日收盘价成交
 """
 import sys
-import os
 from pathlib import Path
 
 import pandas as pd
@@ -25,7 +24,10 @@ from strategies.timing.rsi_strategy import RSIReversalStrategy
 from strategies.timing.momentum_vol_strategy import MomentumVolSizedStrategy
 from strategies.timing.hht_strategy import HHTTimingStrategy
 from strategies.timing.qrs_strategy import QRSTimingStrategy
+from strategy.combiner import WeightedAvgCombiner
+from strategy.composite import CompositeStrategy
 from strategy.portfolio import Portfolio
+from strategy.sizer import VolTargetSizer
 from execution.handler import SimulatedExecutionHandler
 
 
@@ -35,13 +37,26 @@ START = pd.Timestamp('2020-01-02')
 END = pd.Timestamp('2026-02-06')
 INITIAL_CAPITAL = 100000.0
 
+
+def _wrap_forecast_strategy(strategy):
+    """Wrap a forecast-mode strategy in CompositeStrategy for standalone use."""
+    return CompositeStrategy(
+        strategies=[strategy],
+        combiner=WeightedAvgCombiner(),
+        sizer=VolTargetSizer(target_vol=0.15, vol_lookback=20, max_leverage=1.0),
+        rebalance_freq='daily',
+    )
+
+
 STRATEGIES = [
     lambda syms: (BuyAndHoldStrategy(syms), "BuyHold"),
     lambda syms: (RSIReversalStrategy(syms, rsi_period=14, oversold=30, overbought=70), "RSI"),
     lambda syms: (MomentumVolSizedStrategy(syms, momentum_window=20, vol_window=60, rebalance_days=20), "Mom+Vol"),
-    lambda syms: (HHTTimingStrategy(syms, ma_period=60, ht_period=30, position_frac=0.95), "HHT"),
-    lambda syms: (QRSTimingStrategy(syms, regression_window=18, zscore_window=250,
-                                     upper_bound=0.7, lower_bound=-0.7, position_frac=0.95), "QRS"),
+    lambda syms: (_wrap_forecast_strategy(
+        HHTTimingStrategy(syms, ma_period=60, ht_period=30)), "HHT"),
+    lambda syms: (_wrap_forecast_strategy(
+        QRSTimingStrategy(syms, regression_window=18, zscore_window=250,
+                          upper_bound=0.7, lower_bound=-0.7)), "QRS"),
 ]
 
 

@@ -59,7 +59,7 @@ REGISTRY_PATH = ROOT / 'output' / 'factor_registry.csv'
 def load_active_factors(
     use_1min: bool = True,
     use_alpha101: bool = True,
-) -> Tuple[Dict[str, int], Set[str], Set[str]]:
+) -> Tuple[Dict[str, int], Set[str], Set[str], Set[str]]:
     """
     读取 factor_registry.csv, 返回 prod 因子信息.
 
@@ -68,10 +68,13 @@ def load_active_factors(
       "alpha101::Alphas::alpha_033"                → "alpha_033"
 
     Returns:
-        selected_factors: {compute_key: direction} 全部 prod 因子
-        factors_1d:       1d-only 因子 compute_key 集合 (input_data != 'price_1min')
-        factors_alpha101: alpha101 因子 compute_key 集合
+        selected_factors:   {compute_key: direction} 全部 prod 因子
+        factors_1d:         1d-only 因子 compute_key 集合 (input_data != 'price_1min')
+        factors_alpha101:   alpha101 因子 compute_key 集合
+        factors_neutralize: 需要行业中性化的因子 compute_key 集合
     """
+    from strategies.cross_section.neutralize import VOLUME_BIASED_FACTORS
+
     df = pd.read_csv(REGISTRY_PATH, encoding='utf-8-sig')
     prod = df[df['status'] == 'prod'].copy()
 
@@ -83,6 +86,7 @@ def load_active_factors(
     selected_factors = {}
     factors_1d = set()
     factors_alpha101 = set()
+    factors_neutralize = set()
 
     for _, row in prod.iterrows():
         ref = row['formula_code_ref']
@@ -94,8 +98,10 @@ def load_active_factors(
             factors_1d.add(compute_key)
         if row['factor_id'].startswith('CS_A101_'):
             factors_alpha101.add(compute_key)
+        if row['input_data'] == 'fundamental' or compute_key in VOLUME_BIASED_FACTORS:
+            factors_neutralize.add(compute_key)
 
-    return selected_factors, factors_1d, factors_alpha101
+    return selected_factors, factors_1d, factors_alpha101, factors_neutralize
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -222,10 +228,18 @@ def compute_selected_factors(
 def score_stocks(
     factors: Dict[str, pd.DataFrame],
     selected_factors: Dict[str, int],
+    neutralize_factor_names: Set[str] = None,
+    neutralize_sectors: bool = True,
 ) -> pd.DataFrame:
     """
     取每个因子最新值, 按 IC 方向调整, MAD winsorize + z-score 等权打分.
     缺失因子的 z-score 视为 0 (截面均值).
+
+    Args:
+        factors:                  {name: DataFrame(dates x symbols)}
+        selected_factors:         {compute_key: direction}
+        neutralize_factor_names:  需要行业中性化的因子名集合
+        neutralize_sectors:       是否做行业中性化
 
     Returns:
         DataFrame: index=symbol, columns=[score, factor1, factor2, ...]
@@ -240,6 +254,17 @@ def score_stocks(
         return pd.DataFrame()
 
     df = pd.DataFrame(latest)
+
+    # 行业中性化: z-score 前减行业均值
+    if neutralize_sectors and neutralize_factor_names:
+        cols = neutralize_factor_names & set(df.columns)
+        if cols:
+            from strategies.cross_section.neutralize import (
+                load_gics_sector_map, neutralize_factors,
+            )
+            sector_map = load_gics_sector_map()
+            if sector_map is not None:
+                df = neutralize_factors(df, sector_map, cols)
 
     # MAD winsorize + z-score (横截面), 按 IC 方向调整符号
     for col in df.columns:
@@ -327,6 +352,8 @@ def main():
                         help='Skip 1min factors (use daily factors only)')
     parser.add_argument('--no-alpha101', action='store_true',
                         help='Skip alpha101 factors (use style factors only)')
+    parser.add_argument('--no-neutralize', action='store_true',
+                        help='Skip sector neutralization for fundamental factors')
     parser.add_argument('--start-1min', type=str, default=None,
                         help='1min data start (default: use full 1d range)')
     args = parser.parse_args()
@@ -342,11 +369,12 @@ def main():
     if not REGISTRY_PATH.exists():
         print(f'ERROR: {REGISTRY_PATH} not found.')
         return
-    selected_factors, factors_1d, factors_alpha101 = load_active_factors(
-        use_1min=use_1min, use_alpha101=use_alpha101)
+    selected_factors, factors_1d, factors_alpha101, factors_neutralize = \
+        load_active_factors(use_1min=use_1min, use_alpha101=use_alpha101)
     print(f'  Active factors: {len(selected_factors)} '
           f'(style: {len(selected_factors) - len(factors_alpha101)}, '
-          f'alpha101: {len(factors_alpha101)})')
+          f'alpha101: {len(factors_alpha101)}, '
+          f'neutralize: {len(factors_neutralize)})')
 
     # ── 1. 加载数据 ──
     print('\n[1/3] Loading data ...')
@@ -393,8 +421,13 @@ def main():
         return
 
     # ── 3. 打分 & 排名 ──
-    print('\n[3/3] Scoring ...')
-    scored = score_stocks(factors, selected_factors)
+    neutralize = not args.no_neutralize
+    print(f'\n[3/3] Scoring ... (neutralize={neutralize})')
+    scored = score_stocks(
+        factors, selected_factors,
+        neutralize_factor_names=factors_neutralize,
+        neutralize_sectors=neutralize,
+    )
 
     if scored.empty:
         print('ERROR: No valid scores.')

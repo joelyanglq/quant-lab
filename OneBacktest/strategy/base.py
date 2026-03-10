@@ -12,11 +12,17 @@ class Strategy(ABC):
 
     回调:
         on_init()              引擎启动时调用一次
-        on_bar(bar)            新 bar 到达（必须实现）
+        on_bar(bar)            新 bar 到达
         on_fill(fill)          成交回报
         on_market_close(dt)    每日收盘后（所有 symbol bar 处理完毕）
         on_week_end(dt)        每周最后一个交易日收盘后
         on_month_end(dt)       每月最后一个交易日收盘后
+
+    信号模式 (v2):
+        on_market_close / on_week_end / on_month_end 可返回
+        Dict[str, float] 作为 forecast (∈ [-1, +1]).
+        由 CompositeStrategy 收集并通过 Combiner → Sizer 转为订单.
+        返回 None 表示不产出信号.
 
     下单:
         buy(symbol, qty)       买入
@@ -34,6 +40,7 @@ class Strategy(ABC):
     holdings: dict = None                   # Engine 注入（Portfolio.current_holdings 引用）
     latest_prices: Dict[str, Bar] = None    # Engine 注入
     history = None                          # Engine 注入（HistoryManager）
+    data = None                             # Engine 注入（DataContext, 可选）
 
     # ==================== 生命周期回调 ====================
 
@@ -41,10 +48,9 @@ class Strategy(ABC):
         """引擎启动时调用一次"""
         pass
 
-    @abstractmethod
     def on_bar(self, bar: Bar):
-        """新 bar 到达，核心决策逻辑"""
-        ...
+        """新 bar 到达"""
+        pass
 
     def on_fill(self, fill: FillEvent):
         """成交回报"""
@@ -53,15 +59,15 @@ class Strategy(ABC):
     # ---- 聚合回调（opt-in, 默认不做任何事）----
 
     def on_market_close(self, dt):
-        """每日收盘后, 所有 symbol 的 bar 都处理完毕后触发."""
+        """每日收盘后. 可返回 Dict[str, float] 作为 forecast."""
         pass
 
     def on_week_end(self, dt):
-        """每周最后一个交易日收盘后触发 (在 on_market_close 之后)."""
+        """每周最后一个交易日收盘后. 可返回 Dict[str, float] 作为 forecast."""
         pass
 
     def on_month_end(self, dt):
-        """每月最后一个交易日收盘后触发 (在 on_market_close 之后)."""
+        """每月最后一个交易日收盘后. 可返回 Dict[str, float] 作为 forecast."""
         pass
 
     # ==================== 下单 API ====================
