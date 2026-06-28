@@ -1,0 +1,1187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Platform - Carver-Style Multi-Strategy Framework</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2333;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #3fb950;
+    --accent3: #d29922;
+    --accent4: #f78166;
+    --accent5: #bc8cff;
+    --gradient1: linear-gradient(135deg, #58a6ff 0%, #bc8cff 100%);
+    --gradient2: linear-gradient(135deg, #3fb950 0%, #58a6ff 100%);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* ---- Hero ---- */
+  .hero {
+    position: relative;
+    padding: 80px 40px 60px;
+    text-align: center;
+    background: radial-gradient(ellipse at 50% 0%, rgba(88,166,255,0.12) 0%, transparent 60%);
+    border-bottom: 1px solid var(--border);
+  }
+  .hero h1 {
+    font-size: 3rem;
+    font-weight: 800;
+    background: var(--gradient1);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 12px;
+    letter-spacing: -1px;
+  }
+  .hero .subtitle {
+    font-size: 1.15rem;
+    color: var(--text-muted);
+    max-width: 720px;
+    margin: 0 auto 28px;
+  }
+  .hero .badges {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .badge .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+  }
+  .badge .dot.green { background: var(--accent2); }
+  .badge .dot.blue  { background: var(--accent);  }
+  .badge .dot.gold  { background: var(--accent3); }
+
+  /* ---- Layout ---- */
+  .container {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  section {
+    padding: 56px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  section:last-child { border-bottom: none; }
+
+  h2 {
+    font-size: 1.7rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  h2 .icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem;
+    flex-shrink: 0;
+  }
+  .section-desc {
+    color: var(--text-muted);
+    margin-bottom: 32px;
+    font-size: 0.95rem;
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin: 24px 0 10px;
+    color: var(--accent);
+  }
+
+  /* ---- Cards ---- */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-title .tag {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--surface2);
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  .card p, .card li {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+  .card ul {
+    list-style: none;
+    padding: 0;
+  }
+  .card ul li {
+    padding: 3px 0;
+    padding-left: 16px;
+    position: relative;
+  }
+  .card ul li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 11px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: 0.5;
+  }
+
+  /* ---- Pipeline / Flow ---- */
+  .pipeline {
+    display: flex;
+    gap: 0;
+    align-items: stretch;
+    overflow-x: auto;
+    padding: 8px 0;
+  }
+  .pipe-stage {
+    flex: 1;
+    min-width: 180px;
+    position: relative;
+    padding: 20px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .pipe-stage + .pipe-stage { margin-left: 36px; }
+  .pipe-stage + .pipe-stage::before {
+    content: '';
+    position: absolute;
+    left: -28px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 2px;
+    background: var(--accent);
+  }
+  .pipe-stage + .pipe-stage::after {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 50%;
+    transform: translateY(-50%) rotate(-45deg);
+    width: 8px; height: 8px;
+    border-right: 2px solid var(--accent);
+    border-bottom: 2px solid var(--accent);
+  }
+  .pipe-stage .stage-num {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+  .pipe-stage .stage-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .pipe-stage .stage-file {
+    font-size: 0.78rem;
+    color: var(--accent5);
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    margin-bottom: 6px;
+  }
+  .pipe-stage .stage-desc {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  /* ---- Tree ---- */
+  .tree {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+    font-size: 0.85rem;
+    line-height: 1.9;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px;
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--text-muted);
+  }
+  .tree .dir  { color: var(--accent);  font-weight: 600; }
+  .tree .file { color: var(--text); }
+  .tree .comment { color: #484f58; }
+
+  /* ---- Table ---- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    margin: 16px 0;
+  }
+  thead th {
+    text-align: left;
+    padding: 10px 14px;
+    background: var(--surface2);
+    border-bottom: 2px solid var(--border);
+    font-weight: 600;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+  }
+  tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tbody tr:hover { background: rgba(88,166,255,0.04); }
+
+  code, .mono {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 22px;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.7;
+    margin: 12px 0;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    font-size: inherit;
+  }
+
+  /* ---- Mode comparison ---- */
+  .modes {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  @media (max-width: 900px) {
+    .modes { grid-template-columns: repeat(2, 1fr); }
+  }
+  .mode-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .mode-card .mode-num {
+    font-size: 2rem;
+    font-weight: 800;
+    opacity: 0.08;
+    position: absolute;
+    top: 8px; right: 14px;
+  }
+  .mode-card .mode-name {
+    font-weight: 700;
+    font-size: 1.05rem;
+    margin-bottom: 4px;
+  }
+  .mode-card .mode-desc {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+  .mode-card .mode-tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    padding: 3px 10px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+  .mode-card:nth-child(1) .mode-tag { background: rgba(63,185,80,0.15); color: var(--accent2); }
+  .mode-card:nth-child(2) .mode-tag { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .mode-card:nth-child(3) .mode-tag { background: rgba(210,153,34,0.15); color: var(--accent3); }
+  .mode-card:nth-child(4) .mode-tag { background: rgba(247,129,102,0.15); color: var(--accent4); }
+
+  /* ---- Diagram ---- */
+  .diagram-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px;
+    overflow-x: auto;
+  }
+  .diagram-box svg { display: block; margin: 0 auto; }
+
+  /* ---- Footer ---- */
+  footer {
+    text-align: center;
+    padding: 40px 24px;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    border-top: 1px solid var(--border);
+  }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 720px) {
+    .hero h1 { font-size: 2rem; }
+    .pipeline { flex-direction: column; }
+    .pipe-stage + .pipe-stage { margin-left: 0; margin-top: 24px; }
+    .pipe-stage + .pipe-stage::before,
+    .pipe-stage + .pipe-stage::after { display: none; }
+    .card-grid { grid-template-columns: 1fr; }
+  }
+
+  .highlight { color: var(--accent); }
+  .highlight-green { color: var(--accent2); }
+  .highlight-gold { color: var(--accent3); }
+  .highlight-red { color: var(--accent4); }
+  .highlight-purple { color: var(--accent5); }
+
+  .formula {
+    background: var(--surface2);
+    border-left: 3px solid var(--accent);
+    padding: 14px 20px;
+    border-radius: 0 8px 8px 0;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.88rem;
+    line-height: 1.8;
+    margin: 12px 0;
+    overflow-x: auto;
+    white-space: pre-wrap;
+  }
+
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin-bottom: 8px;
+  }
+  .toc-title { font-weight: 700; margin-bottom: 10px; font-size: 0.95rem; }
+  .toc ol {
+    padding-left: 20px;
+    font-size: 0.9rem;
+    columns: 2;
+    column-gap: 32px;
+  }
+  .toc ol li { padding: 3px 0; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  @media (max-width: 600px) { .toc ol { columns: 1; } }
+</style>
+</head>
+<body>
+
+<!-- ============================================== HERO ============================================== -->
+<header class="hero">
+  <h1>Trading Platform</h1>
+  <p class="subtitle">
+    Carver-style multi-strategy stock trading framework &mdash;
+    backtest, shadow, paper, live(IBKR) 共用同一份策略代码。<br>
+    基于 Robert Carver《Systematic Trading》三层乘性架构，4 类策略统一编排。
+  </p>
+  <div class="badges">
+    <span class="badge"><span class="dot green"></span>Python 3.12</span>
+    <span class="badge"><span class="dot blue"></span>Event-Driven</span>
+    <span class="badge"><span class="dot gold"></span>IBKR Live</span>
+    <span class="badge"><span class="dot green"></span>v0.1.0</span>
+  </div>
+</header>
+
+<!-- ============================================== TOC ============================================== -->
+<div class="container" style="padding-top: 40px;">
+  <div class="toc">
+    <div class="toc-title">Contents</div>
+    <ol>
+      <li><a href="#what">What &mdash; 这是什么</a></li>
+      <li><a href="#why">Why &mdash; 设计动机</a></li>
+      <li><a href="#arch">三层乘性架构</a></li>
+      <li><a href="#flow">数据流 &amp; 核心管线</a></li>
+      <li><a href="#modules">模块全景</a></li>
+      <li><a href="#strategies">四类策略原型</a></li>
+      <li><a href="#modes">四种运行模式</a></li>
+      <li><a href="#risk">风控体系</a></li>
+      <li><a href="#analytics">回测分析</a></li>
+      <li><a href="#tree">目录结构</a></li>
+      <li><a href="#usage">命令行用法</a></li>
+      <li><a href="#extend">扩展策略</a></li>
+    </ol>
+  </div>
+</div>
+
+<!-- ============================================== WHAT ============================================== -->
+<section id="what">
+  <div class="container">
+    <h2><span class="icon" style="background:rgba(88,166,255,0.15);">?</span> What &mdash; 这是什么</h2>
+    <p class="section-desc">
+      <code>trading_platform</code> 是一个 <strong>模块化、事件驱动</strong> 的美股量化交易框架。
+      它把从信号生成到真实下单的全链路，拆解为可独立测试和替换的纯函数层。
+    </p>
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-title">一份代码，四种运行</div>
+        <p>同一个 <code>Alpha</code> 子类、同一个 <code>CompositeStrategy</code>，
+          无修改即可在 backtest / shadow / paper / live 四种模式下运行。
+          运行时差异被 <code>ExecutionHandler</code> 和 <code>DataFeed</code> 封装。</p>
+      </div>
+      <div class="card">
+        <div class="card-title">四类策略，统一接口</div>
+        <ul>
+          <li>单票择时 (Timing)</li>
+          <li>截面多因子 (Cross-Section)</li>
+          <li>配对统计套利 (Pairs/Stat-Arb)</li>
+          <li>板块/风格轮动 (Rotation)</li>
+        </ul>
+        <p style="margin-top:6px;">全部实现 <code>forecast(dt) &rarr; dict[sym, float]</code>，引擎对策略类型透明。</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Carver 全链路实现</div>
+        <p>严格遵循 Robert Carver 的 Forecast &rarr; Combine &rarr; Size 三层模型：
+          forecast 标准化 (Ch7)、handcrafted 权重 (Ch4)、vol-target (Ch9)、
+          half-Kelly (Ch9)、drawdown scaling (Ch10)、SR plausibility flag (Ch2)。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================== WHY ============================================== -->
+<section id="why">
+  <div class="container">
+    <h2><span class="icon" style="background:rgba(63,185,80,0.15);">!</span> Why &mdash; 设计动机</h2>
+    <p class="section-desc">解决量化策略从研究到实盘的"最后一公里"问题。</p>
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-title">研究 &ne; 生产</div>
+        <p>传统回测框架的策略代码无法直接在实盘运行。
+          本框架通过统一事件模型 (<code>Bar</code>, <code>OrderEvent</code>, <code>FillEvent</code>)
+          和抽象执行层，让策略代码在回测和实盘之间零修改切换。</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Carver 而非 Zipline</div>
+        <p>区别于 portfolio-level weight 方法，Carver 架构把预测 (forecast)、合并 (combine)、
+          定量 (size) 分成三个独立纯函数，每层可单独测试、替换、调参。
+          这让多策略组合天然成为"加一个 Alpha + 调整 Combiner 权重"。</p>
+      </div>
+      <div class="card">
+        <div class="card-title">渐进上线</div>
+        <p>Shadow (看不下单) &rarr; Paper (IBKR 模拟盘) &rarr; Live (真实资金)。
+          每一步用同一份代码和 Kill-Switch 保护。
+          小资金先跑，验证滑点/对账后再加仓。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================== ARCH ============================================== -->
+<section id="arch">
+  <div class="container">
+    <h2><span class="icon" style="background:rgba(188,140,255,0.15);">&lambda;</span> 三层乘性架构 (Carver Ch5)</h2>
+    <p class="section-desc">每一层是独立纯函数 &mdash; 可单独测试、可单独替换。</p>
+
+    <div class="pipeline">
+      <div class="pipe-stage">
+        <div class="stage-num">Layer 1</div>
+        <div class="stage-title">Alpha (Forecast)</div>
+        <div class="stage-file">strategy/alpha.py</div>
+        <div class="stage-desc">
+          每个 Alpha 输出 <code>{sym: float}</code><br>
+          标准化: <code>E[|f|] &asymp; 10</code><br>
+          Cap: <code>[-20, +20]</code><br>
+          NaN = 无信号
+        </div>
+      </div>
+      <div class="pipe-stage">
+        <div class="stage-num">Layer 2</div>
+        <div class="stage-title">Combiner</div>
+        <div class="stage-file">strategy/combiner.py</div>
+        <div class="stage-desc">
+          Weighted / Handcrafted / Layered<br>
+          &plusmn;2&sigma; winsorize<br>
+          NaN-aware renormalize<br>
+          乘性分层 (regime &times; picking &times; timing)
+        </div>
+      </div>
+      <div class="pipe-stage">
+        <div class="stage-num">Layer 3</div>
+        <div class="stage-title">RiskSizer</div>
+        <div class="stage-file">strategy/sizer.py</div>
+        <div class="stage-desc">
+          Vol-Target &rarr; 手数<br>
+          Half-Kelly 缩放<br>
+          Drawdown 自动减仓<br>
+          Max leverage 约束
+        </div>
+      </div>
+      <div class="pipe-stage">
+        <div class="stage-num">Output</div>
+        <div class="stage-title">Orders</div>
+        <div class="stage-file">strategy/composite.py</div>
+        <div class="stage-desc">
+          Target &minus; Current = Delta<br>
+          &Delta; &rarr; <code>OrderEvent</code><br>
+          提交给 ExecutionHandler
+        </div>
+      </div>
+    </div>
+
+    <h3>Sizing 公式</h3>
+    <div class="formula">
+position[i] = (forecast[i] / 10)                          <span style="color:var(--text-muted);"># 标准化</span>
+            &times; (target_vol_per_inst / &sigma;[i])              <span style="color:var(--text-muted);"># vol target</span>
+            &times; (capital &times; weight[i] / price[i])          <span style="color:var(--text-muted);"># 转手数</span>
+            &times; half_kelly_factor                         <span style="color:var(--text-muted);"># 0.5 &times; SR / &sigma;, clipped [0.3, 1.0]</span>
+            &times; drawdown_scaler                           <span style="color:var(--text-muted);"># 1.0 &rarr; 0.5 &rarr; 0 at 5%/10%/20% DD</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================== FLOW ============================================== -->
+<section id="flow">
+  <div class="container">
+    <h2><span class="icon" style="background:rgba(210,153,34,0.15);">&rArr;</span> 数据流 &amp; 核心管线</h2>
+    <p class="section-desc">从市场数据到订单执行的完整事件驱动路径。</p>
+
+    <div class="diagram-box">
+      <svg viewBox="0 0 940 520" xmlns="http://www.w3.org/2000/svg" style="max-width:940px; width:100%;">
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+            <path d="M0,0 L8,3 L0,6" fill="#58a6ff"/>
+          </marker>
+          <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+            <path d="M0,0 L8,3 L0,6" fill="#3fb950"/>
+          </marker>
+          <filter id="glow"><feGaussianBlur stdDeviation="2" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+
+        <!-- Data Sources -->
+        <rect x="20" y="20" width="160" height="60" rx="10" fill="#1c2333" stroke="#30363d"/>
+        <text x="100" y="46" text-anchor="middle" fill="#58a6ff" font-size="13" font-weight="700">Parquet / IBKR</text>
+        <text x="100" y="64" text-anchor="middle" fill="#8b949e" font-size="11">DataFeed (Bar)</text>
+
+        <!-- Engine -->
+        <rect x="20" y="130" width="160" height="70" rx="10" fill="#1c2333" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="100" y="155" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">Engine</text>
+        <text x="100" y="175" text-anchor="middle" fill="#8b949e" font-size="10">heapq multi-freq merge</text>
+        <text x="100" y="189" text-anchor="middle" fill="#8b949e" font-size="10">core/engine.py</text>
+
+        <!-- Arrow: Feed -> Engine -->
+        <line x1="100" y1="80" x2="100" y2="128" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+        <!-- DataContext -->
+        <rect x="240" y="20" width="160" height="60" rx="10" fill="#1c2333" stroke="#30363d"/>
+        <text x="320" y="46" text-anchor="middle" fill="#bc8cff" font-size="13" font-weight="700">DataContext</text>
+        <text x="320" y="64" text-anchor="middle" fill="#8b949e" font-size="11">PIT-safe as_of(dt, key)</text>
+
+        <!-- CompositeStrategy -->
+        <rect x="240" y="130" width="160" height="70" rx="10" fill="#1c2333" stroke="#bc8cff" stroke-width="1.5"/>
+        <text x="320" y="152" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">Composite</text>
+        <text x="320" y="168" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">Strategy</text>
+        <text x="320" y="189" text-anchor="middle" fill="#8b949e" font-size="10">strategy/composite.py</text>
+
+        <!-- Arrow: Engine -> CompositeStrategy -->
+        <line x1="180" y1="165" x2="238" y2="165" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <text x="209" y="158" text-anchor="middle" fill="#8b949e" font-size="9">on_bar</text>
+
+        <!-- Arrow: DataContext -> CompositeStrategy -->
+        <line x1="320" y1="80" x2="320" y2="128" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+        <!-- Alpha cluster -->
+        <rect x="470" y="20" width="190" height="110" rx="10" fill="#1c2333" stroke="#30363d"/>
+        <text x="565" y="42" text-anchor="middle" fill="#3fb950" font-size="13" font-weight="700">Alpha Pool</text>
+        <text x="565" y="62" text-anchor="middle" fill="#8b949e" font-size="10">forecast(dt, ctx) &rarr; {sym: float}</text>
+        <text x="487" y="84" fill="#8b949e" font-size="10">Timing</text>
+        <rect x="480" y="89" width="80" height="5" rx="2" fill="#3fb950" opacity="0.3"/>
+        <text x="577" y="84" fill="#8b949e" font-size="10">CrossSection</text>
+        <rect x="570" y="89" width="80" height="5" rx="2" fill="#58a6ff" opacity="0.3"/>
+        <text x="487" y="108" fill="#8b949e" font-size="10">Pairs</text>
+        <rect x="480" y="113" width="80" height="5" rx="2" fill="#d29922" opacity="0.3"/>
+        <text x="577" y="108" fill="#8b949e" font-size="10">Rotation</text>
+        <rect x="570" y="113" width="80" height="5" rx="2" fill="#f78166" opacity="0.3"/>
+
+        <!-- Arrow: CompositeStrategy -> Alpha -->
+        <line x1="400" y1="150" x2="468" y2="80" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+        <!-- Combiner -->
+        <rect x="720" y="30" width="200" height="55" rx="10" fill="#1c2333" stroke="#30363d"/>
+        <text x="820" y="52" text-anchor="middle" fill="#d29922" font-size="13" font-weight="700">Combiner</text>
+        <text x="820" y="70" text-anchor="middle" fill="#8b949e" font-size="10">Weighted / Handcrafted / Layered</text>
+
+        <!-- Arrow: Alpha -> Combiner -->
+        <line x1="660" y1="55" x2="718" y2="55" stroke="#d29922" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+        <!-- RiskSizer -->
+        <rect x="720" y="110" width="200" height="55" rx="10" fill="#1c2333" stroke="#30363d"/>
+        <text x="820" y="132" text-anchor="middle" fill="#f78166" font-size="13" font-weight="700">RiskSizer</text>
+        <text x="820" y="150" text-anchor="middle" fill="#8b949e" font-size="10">Vol-target &times; Kelly &times; DD-scale</text>
+
+        <!-- Arrow: Combiner -> Sizer -->
+        <line x1="820" y1="85" x2="820" y2="108" stroke="#f78166" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+        <!-- Arrow: Sizer -> CompositeStrategy (back) -->
+        <path d="M720,140 Q690,140 690,165 Q690,190 400,165" fill="none" stroke="#bc8cff" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+        <text x="560" y="190" text-anchor="middle" fill="#8b949e" font-size="9">target positions</text>
+
+        <!-- Execution -->
+        <rect x="240" y="250" width="160" height="70" rx="10" fill="#1c2333" stroke="#f78166" stroke-width="1.5"/>
+        <text x="320" y="275" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">Execution</text>
+        <text x="320" y="295" text-anchor="middle" fill="#8b949e" font-size="10">Simulated / Shadow / Live</text>
+        <text x="320" y="309" text-anchor="middle" fill="#8b949e" font-size="10">execution/*.py</text>
+
+        <!-- Arrow: CompositeStrategy -> Execution -->
+        <line x1="320" y1="200" x2="320" y2="248" stroke="#f78166" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <text x="345" y="228" fill="#8b949e" font-size="9">OrderEvent</text>
+
+        <!-- Engine -> Execution (process_bar) -->
+        <path d="M100,200 L100,285 L238,285" fill="none" stroke="#58a6ff" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+        <text x="150" y="275" fill="#8b949e" font-size="9">process_bar</text>
+
+        <!-- Portfolio -->
+        <rect x="480" y="250" width="160" height="70" rx="10" fill="#1c2333" stroke="#3fb950" stroke-width="1.5"/>
+        <text x="560" y="275" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">Portfolio</text>
+        <text x="560" y="295" text-anchor="middle" fill="#8b949e" font-size="10">positions / cash / equity</text>
+        <text x="560" y="309" text-anchor="middle" fill="#8b949e" font-size="10">risk/portfolio.py</text>
+
+        <!-- Arrow: Execution -> Portfolio -->
+        <line x1="400" y1="285" x2="478" y2="285" stroke="#3fb950" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+        <text x="439" y="278" text-anchor="middle" fill="#8b949e" font-size="9">FillEvent</text>
+
+        <!-- Risk controls -->
+        <rect x="480" y="370" width="160" height="80" rx="10" fill="#1c2333" stroke="#f78166" stroke-width="1"/>
+        <text x="560" y="395" text-anchor="middle" fill="#f78166" font-size="13" font-weight="700">Risk Controls</text>
+        <text x="560" y="412" text-anchor="middle" fill="#8b949e" font-size="10">KillSwitch</text>
+        <text x="560" y="425" text-anchor="middle" fill="#8b949e" font-size="10">Reconciliation</text>
+        <text x="560" y="438" text-anchor="middle" fill="#8b949e" font-size="10">SlippageMonitor</text>
+
+        <!-- Arrow: Portfolio -> Risk -->
+        <line x1="560" y1="320" x2="560" y2="368" stroke="#f78166" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+        <!-- Analytics -->
+        <rect x="720" y="250" width="200" height="70" rx="10" fill="#1c2333" stroke="#d29922" stroke-width="1"/>
+        <text x="820" y="275" text-anchor="middle" fill="#d29922" font-size="13" font-weight="700">Analytics</text>
+        <text x="820" y="295" text-anchor="middle" fill="#8b949e" font-size="10">SR, Drawdown, Calmar, CI</text>
+        <text x="820" y="309" text-anchor="middle" fill="#8b949e" font-size="10">Plausibility flags</text>
+
+        <!-- Arrow: Portfolio -> Analytics -->
+        <line x1="640" y1="280" x2="718" y2="280" stroke="#d29922" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+        <!-- IBKR -->
+        <rect x="60" y="370" width="120" height="50" rx="10" fill="#1c2333" stroke="#30363d"/>
+        <text x="120" y="393" text-anchor="middle" fill="#58a6ff" font-size="12" font-weight="600">IBKR TWS</text>
+        <text x="120" y="410" text-anchor="middle" fill="#8b949e" font-size="10">ib_insync</text>
+
+        <!-- Arrow: Execution <-> IBKR -->
+        <path d="M240,300 L120,370" fill="none" stroke="#58a6ff" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+        <!-- Clock -->
+        <rect x="720" y="370" width="200" height="50" rx="10" fill="#1c2333" stroke="#30363d"/>
+        <text x="820" y="393" text-anchor="middle" fill="#8b949e" font-size="12" font-weight="600">Clock</text>
+        <text x="820" y="410" text-anchor="middle" fill="#8b949e" font-size="10">BacktestClock / LiveClock</text>
+
+        <!-- Legend -->
+        <text x="20" y="490" fill="#8b949e" font-size="10">
+          <tspan fill="#58a6ff">&mdash;&mdash;</tspan> event flow
+          <tspan dx="20" fill="#3fb950">&mdash;&mdash;</tspan> data / fill
+          <tspan dx="20" fill="#f78166">&mdash;&mdash;</tspan> orders / risk
+          <tspan dx="20" fill="#bc8cff">&mdash;&mdash;</tspan> orchestration
+          <tspan dx="20" fill="#8b949e">- - -</tspan> callback / query
+        </text>
+      </svg>
+    </div>
+
+    <h3>事件序列 (每根 Bar)</h3>
+    <table>
+      <thead>
+        <tr><th>Step</th><th>Component</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td><code>DataFeed</code></td><td>Emit <code>Bar</code> (from Parquet or IBKR real-time)</td></tr>
+        <tr><td>2</td><td><code>Engine</code></td><td>Set clock &rarr; update <code>Portfolio.update_market()</code> &rarr; call <code>Execution.process_bar()</code> (fill pending orders)</td></tr>
+        <tr><td>3</td><td><code>CompositeStrategy</code></td><td>Receive <code>on_bar()</code>, trigger <code>_rebalance(dt)</code> if frequency matches</td></tr>
+        <tr><td>4</td><td><code>Alpha[]</code></td><td>Each alpha computes <code>forecast(dt, ctx) &rarr; {sym: float}</code></td></tr>
+        <tr><td>5</td><td><code>Combiner</code></td><td>Merge all forecast dicts (weighted/layered/handcrafted)</td></tr>
+        <tr><td>6</td><td><code>RiskSizer</code></td><td>Combined forecast &times; vol-target &times; Kelly &times; DD-scale &rarr; target shares</td></tr>
+        <tr><td>7</td><td><code>CompositeStrategy</code></td><td>Diff: target &minus; current &rarr; <code>OrderEvent</code> per symbol delta</td></tr>
+        <tr><td>8</td><td><code>ExecutionHandler</code></td><td>Submit order (queue / shadow-log / IBKR-place)</td></tr>
+        <tr><td>9</td><td><code>Portfolio</code></td><td>On <code>FillEvent</code>: update positions, cash, equity curve</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================== MODULES ============================================== -->
+<section id="modules">
+  <div class="container">
+    <h2><span class="icon" style="background:rgba(88,166,255,0.15);">&equiv;</span> 模块全景</h2>
+    <p class="section-desc">8 个顶层模块，职责清晰分离。</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-title"><span class="highlight">core/</span> <span class="tag">Foundation</span></div>
+        <ul>
+          <li><strong>events.py</strong> &mdash; <code>Bar</code>, <code>OrderEvent</code>, <code>FillEvent</code>, <code>RiskEvent</code>, <code>Frequency</code> (frozen dataclass)</li>
+          <li><strong>clock.py</strong> &mdash; <code>BacktestClock</code> / <code>LiveClock</code></li>
+          <li><strong>context.py</strong> &mdash; <code>DataContext</code> ABC + <code>BacktestDataContext</code> (PIT-safe, LRU-cached)</li>
+          <li><strong>engine.py</strong> &mdash; Multi-frequency event loop, heapq merge, period boundary callbacks</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="highlight-green">data/</span> <span class="tag">I/O</span></div>
+        <ul>
+          <li><strong>feed.py</strong> &mdash; <code>DataFeed</code> ABC + <code>BacktestFeed</code> (Parquet &rarr; Bar stream)</li>
+          <li><strong>live_feed.py</strong> &mdash; <code>LiveDataFeed</code> (IBKR real-time bars via ib_insync)</li>
+          <li><strong>storage/parquet.py</strong> &mdash; Year-partitioned parquet reader</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="highlight-purple">strategy/</span> <span class="tag">Brain</span></div>
+        <ul>
+          <li><strong>alpha.py</strong> &mdash; <code>Alpha</code> ABC + <code>ScalingMixin</code> (Carver forecast protocol)</li>
+          <li><strong>combiner.py</strong> &mdash; <code>WeightedCombiner</code> / <code>HandcraftedCombiner</code> / <code>LayeredCombiner</code></li>
+          <li><strong>sizer.py</strong> &mdash; <code>RiskSizer</code>: vol-target, half-Kelly, drawdown scaling</li>
+          <li><strong>composite.py</strong> &mdash; <code>CompositeStrategy</code>: Alpha &rarr; Combiner &rarr; Sizer &rarr; Orders</li>
+          <li><strong>archetypes/</strong> &mdash; 4 built-in Alpha implementations</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="highlight-red">execution/</span> <span class="tag">Broker</span></div>
+        <ul>
+          <li><strong>base.py</strong> &mdash; <code>ExecutionHandler</code> ABC (submit/cancel/fill callback)</li>
+          <li><strong>simulated.py</strong> &mdash; T+1 close fill + slippage + commission</li>
+          <li><strong>shadow.py</strong> &mdash; Live data, no real orders (JSONL ledger)</li>
+          <li><strong>live_ibkr.py</strong> &mdash; Real orders via IBKR (ib_insync, MKT/LMT)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="highlight-red">risk/</span> <span class="tag">Safety</span></div>
+        <ul>
+          <li><strong>portfolio.py</strong> &mdash; Positions, cash, equity curve, daily returns</li>
+          <li><strong>kill_switch.py</strong> &mdash; 6 trigger conditions, persistent JSON state</li>
+          <li><strong>reconciliation.py</strong> &mdash; 60s position reconciliation vs IBKR</li>
+          <li><strong>monitoring.py</strong> &mdash; <code>SlippageMonitor</code> + <code>OrderAuditLog</code> (JSONL)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="highlight-gold">analytics/</span> <span class="tag">Eval</span></div>
+        <ul>
+          <li><strong>metrics.py</strong> &mdash; SR, CI (t-based + bootstrap), skew, rolling SR, max DD, Calmar</li>
+          <li>Carver plausibility flags (SR &gt; 0.5 single / &gt; 1.0 portfolio)</li>
+          <li><code>PerformanceReport</code> dataclass + <code>print_report()</code></li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="highlight">runtime/</span> <span class="tag">Entry</span></div>
+        <ul>
+          <li><strong>backtest.py</strong> &mdash; CLI backtest entry point</li>
+          <li><strong>live.py</strong> &mdash; CLI live/shadow/paper entry point</li>
+          <li><strong>pairs_scanner.py</strong> &mdash; Offline Engle-Granger cointegration scanner</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="highlight">templates/</span> <span class="tag">Examples</span></div>
+        <ul>
+          <li>5 copy-and-modify strategy skeletons</li>
+          <li>Timing, Cross-Section, Pairs, Rotation, Multi-Composite</li>
+          <li>Each includes full runnable example</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================== STRATEGIES ============================================== -->
+<section id="strategies">
+  <div class="container">
+    <h2><span class="icon" style="background:rgba(63,185,80,0.15);">&diams;</span> 四类策略原型</h2>
+    <p class="section-desc">全部实现 <code>Alpha</code> 接口，引擎完全透明。</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Archetype</th>
+          <th>Module</th>
+          <th>Signals</th>
+          <th>Trigger</th>
+          <th>Universe</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong class="highlight-green">Single-Name Timing</strong></td>
+          <td><code>archetypes/single_name_timing.py</code></td>
+          <td>HHT, QRS, MA Cross, RSI, Momentum</td>
+          <td>EOD / Intraday</td>
+          <td>User-specified symbols</td>
+        </tr>
+        <tr>
+          <td><strong class="highlight">Cross-Section Multi-Factor</strong></td>
+          <td><code>archetypes/cross_section.py</code></td>
+          <td>Momentum 12-1, Short Reversal, Low Vol + custom factors</td>
+          <td>Weekly / Monthly</td>
+          <td>S&P 500 / NDX 100</td>
+        </tr>
+        <tr>
+          <td><strong class="highlight-gold">Pairs / Stat-Arb</strong></td>
+          <td><code>archetypes/pairs.py</code></td>
+          <td>Log-spread z-score (Engle-Granger cointegration)</td>
+          <td>30min / EOD</td>
+          <td>Pre-scanned cointegrated pairs</td>
+        </tr>
+        <tr>
+          <td><strong class="highlight-red">Sector Rotation</strong></td>
+          <td><code>archetypes/rotation.py</code></td>
+          <td>12-1 Momentum, cross-sectional z-score</td>
+          <td>Monthly / Weekly</td>
+          <td>11 Sector ETFs (XLK, XLF, ...)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Cross-Section 因子流程</h3>
+    <div class="formula">
+Universe (SP500 + NDX100)
+  &rarr; Factor panels (momentum, reversal, low_vol, ...)
+  &rarr; Cross-sectional z-score (optional sector-neutral)
+  &rarr; Expanding-window IC correlation
+  &rarr; Handcrafted factor weights (Carver Ch4)
+  &rarr; Composite forecast per symbol
+  &rarr; ScalingMixin &rarr; [-20, +20]
+    </div>
+
+    <h3>Pairs Entry/Exit 规则</h3>
+    <div class="formula">
+spread = log(P_A) &minus; &beta; &times; log(P_B)
+z_score = (spread &minus; rolling_mean) / rolling_std
+
+Entry:  |z| &ge; entry_z (default 2.0)  &rarr;  short spread if z &gt; 0, long if z &lt; 0
+Exit:   |z| &lt; exit_z  (default 0.5)
+Stop:   |z| &gt; stop_z  (default 4.0)  &rarr;  force close
+    </div>
+  </div>
+</section>
+
+<!-- ============================================== MODES ============================================== -->
+<section id="modes">
+  <div class="container">
+    <h2><span class="icon" style="background:rgba(210,153,34,0.15);">&ofcir;</span> 四种运行模式</h2>
+    <p class="section-desc">同一份策略代码，渐进式上线路径。</p>
+
+    <div class="modes">
+      <div class="mode-card">
+        <div class="mode-num">1</div>
+        <div class="mode-name">Backtest</div>
+        <div class="mode-desc">Parquet 历史数据<br>SimulatedExecution<br>T+1 close + slippage</div>
+        <span class="mode-tag">Safe &mdash; offline</span>
+      </div>
+      <div class="mode-card">
+        <div class="mode-num">2</div>
+        <div class="mode-name">Shadow</div>
+        <div class="mode-desc">IBKR 实时数据<br>ShadowExecution<br>Log-only, no orders</div>
+        <span class="mode-tag">Safe &mdash; live data</span>
+      </div>
+      <div class="mode-card">
+        <div class="mode-num">3</div>
+        <div class="mode-name">Paper</div>
+        <div class="mode-desc">IBKR Paper 账户<br>LiveExecution (port 7497)<br>Real orders, fake money</div>
+        <span class="mode-tag">Cautious &mdash; paper trade</span>
+      </div>
+      <div class="mode-card">
+        <div class="mode-num">4</div>
+        <div class="mode-name">Live</div>
+        <div class="mode-desc">IBKR 真实账户<br>LiveExecution (port 7496)<br>Real money, kill-switch</div>
+        <span class="mode-tag">Production &mdash; real money</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================== RISK ============================================== -->
+<section id="risk">
+  <div class="container">
+    <h2><span class="icon" style="background:rgba(247,129,102,0.15);">&otimes;</span> 风控体系 (Kill-Switch)</h2>
+    <p class="section-desc">
+      <code>kill_switch.json</code> 持久化状态。任何触发 &rarr; 取消全部挂单 + 拒绝新订单 + 报警。<br>
+      <strong>重启不自动重置</strong> &mdash; 必须显式 <code>KillSwitch().reset(operator_confirm=True)</code>。
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>Trigger</th><th>Default</th><th>Behavior</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Leverage breach</td>
+          <td>&gt; 1.0 (live: 0.5)</td>
+          <td>Immediate trip &mdash; cancel all orders</td>
+        </tr>
+        <tr>
+          <td>Daily P&L loss</td>
+          <td>&gt; 2% NetLiq (live: 1%)</td>
+          <td>Immediate trip</td>
+        </tr>
+        <tr>
+          <td>Single strategy 7-day loss</td>
+          <td>&gt; 5% allocation</td>
+          <td>Pause that strategy only</td>
+        </tr>
+        <tr>
+          <td>IBKR disconnect</td>
+          <td>&gt; 5 minutes</td>
+          <td>Auto trip</td>
+        </tr>
+        <tr>
+          <td>Price anomaly</td>
+          <td>Bar-to-bar &gt; 50%</td>
+          <td>Pause that symbol (no global trip)</td>
+        </tr>
+        <tr>
+          <td>Position reconciliation mismatch</td>
+          <td>&gt; 1 share or $100</td>
+          <td>Immediate trip</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Additional Safety Layers</h3>
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-title">Reconciliation</div>
+        <p>Every 60 seconds, compare local <code>Portfolio</code> positions against IBKR broker positions.
+          Mismatch beyond tolerance triggers kill-switch.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Order Audit Log</div>
+        <p>Append-only JSONL log of all orders and fills.
+          Immutable record for post-mortem and compliance.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Slippage Monitor</div>
+        <p>Track realized slippage vs expected fill regime.
+          Alert if systematic adverse slippage detected.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================== ANALYTICS ============================================== -->
+<section id="analytics">
+  <div class="container">
+    <h2><span class="icon" style="background:rgba(210,153,34,0.15);">&mu;</span> 回测分析 (Analytics)</h2>
+    <p class="section-desc">基于 Carver 的 performance evaluation 框架，含 plausibility flags。</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-title">Core Metrics</div>
+        <ul>
+          <li>Annual Return / Annual Volatility</li>
+          <li>Sharpe Ratio + Confidence Interval (t-test &amp; bootstrap)</li>
+          <li>Max Drawdown + Calmar Ratio</li>
+          <li>Skewness</li>
+          <li>Rolling Sharpe (252-day window)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title">Plausibility Flags (Carver Ch2)</div>
+        <ul>
+          <li>SR &gt; 0.5 for single-instrument &rarr; <span class="highlight-gold">WARNING</span></li>
+          <li>SR &gt; 1.0 for portfolio strategy &rarr; <span class="highlight-red">WARNING</span></li>
+          <li>Negative skew detected &rarr; <span class="highlight-gold">WARNING</span></li>
+          <li>Flags help detect overfitting / look-ahead bias</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================== TREE ============================================== -->
+<section id="tree">
+  <div class="container">
+    <h2><span class="icon" style="background:rgba(88,166,255,0.15);">&#9776;</span> 目录结构</h2>
+    <div class="tree"><span class="dir">trading_platform/</span>
+<span class="dir">├── core/</span>
+│   ├── <span class="file">events.py</span>            <span class="comment"># Bar / OrderEvent / FillEvent / Frequency</span>
+│   ├── <span class="file">clock.py</span>             <span class="comment"># BacktestClock / LiveClock</span>
+│   ├── <span class="file">context.py</span>           <span class="comment"># DataContext ABC, BacktestDataContext (PIT-safe)</span>
+│   └── <span class="file">engine.py</span>            <span class="comment"># Multi-freq event loop (heapq merge)</span>
+│
+<span class="dir">├── data/</span>
+│   ├── <span class="file">feed.py</span>              <span class="comment"># DataFeed ABC + BacktestFeed</span>
+│   ├── <span class="file">live_feed.py</span>         <span class="comment"># LiveDataFeed (IBKR real-time bars)</span>
+│   └── <span class="dir">storage/</span>
+│       └── <span class="file">parquet.py</span>       <span class="comment"># Year-partitioned Parquet reader</span>
+│
+<span class="dir">├── strategy/</span>
+│   ├── <span class="file">alpha.py</span>             <span class="comment"># Alpha ABC + ScalingMixin</span>
+│   ├── <span class="file">combiner.py</span>          <span class="comment"># Weighted / Handcrafted / Layered</span>
+│   ├── <span class="file">sizer.py</span>             <span class="comment"># RiskSizer: vol-target + Kelly + DD</span>
+│   ├── <span class="file">composite.py</span>         <span class="comment"># CompositeStrategy orchestrator</span>
+│   └── <span class="dir">archetypes/</span>
+│       ├── <span class="file">single_name_timing.py</span>  <span class="comment"># HHT / QRS / MA / RSI</span>
+│       ├── <span class="file">cross_section.py</span>       <span class="comment"># Multi-factor (sector-neutral)</span>
+│       ├── <span class="file">pairs.py</span>               <span class="comment"># Cointegration stat-arb</span>
+│       └── <span class="file">rotation.py</span>            <span class="comment"># Sector ETF rotation</span>
+│
+<span class="dir">├── execution/</span>
+│   ├── <span class="file">base.py</span>              <span class="comment"># ExecutionHandler ABC</span>
+│   ├── <span class="file">simulated.py</span>         <span class="comment"># Backtest fill (slippage + commission)</span>
+│   ├── <span class="file">shadow.py</span>            <span class="comment"># Live data, log-only, no real orders</span>
+│   └── <span class="file">live_ibkr.py</span>         <span class="comment"># Real IBKR orders (ib_insync)</span>
+│
+<span class="dir">├── risk/</span>
+│   ├── <span class="file">portfolio.py</span>         <span class="comment"># Position / cash / equity accounting</span>
+│   ├── <span class="file">kill_switch.py</span>       <span class="comment"># 6 triggers, persistent state</span>
+│   ├── <span class="file">reconciliation.py</span>    <span class="comment"># 60s IBKR position reconciliation</span>
+│   └── <span class="file">monitoring.py</span>        <span class="comment"># SlippageMonitor + OrderAuditLog</span>
+│
+<span class="dir">├── analytics/</span>
+│   └── <span class="file">metrics.py</span>           <span class="comment"># SR, CI, DD, Calmar, plausibility flags</span>
+│
+<span class="dir">├── runtime/</span>
+│   ├── <span class="file">backtest.py</span>          <span class="comment"># python -m trading_platform.runtime.backtest</span>
+│   ├── <span class="file">live.py</span>              <span class="comment"># python -m trading_platform.runtime.live</span>
+│   └── <span class="file">pairs_scanner.py</span>     <span class="comment"># Offline cointegration scanner</span>
+│
+<span class="dir">├── templates/</span>                   <span class="comment"># 5 copy-and-modify strategy examples</span>
+└── <span class="dir">tests/</span>                       <span class="comment"># pytest smoke + protocol tests</span></div>
+  </div>
+</section>
+
+<!-- ============================================== USAGE ============================================== -->
+<section id="usage">
+  <div class="container">
+    <h2><span class="icon" style="background:rgba(63,185,80,0.15);">&gt;_</span> 命令行用法</h2>
+
+    <h3>Backtest</h3>
+    <pre><code><span style="color:var(--text-muted);"># 单票择时 (HHT)</span>
+python -m trading_platform.runtime.backtest \
+    --start 2020-01-01 --end 2024-12-31 \
+    --strategy timing --symbols AAPL,MSFT,NVDA --rule HHT
+
+<span style="color:var(--text-muted);"># 多因子截面 (周频, sector-neutral)</span>
+python -m trading_platform.runtime.backtest \
+    --start 2020-01-01 --end 2024-12-31 \
+    --strategy cross_section --rebalance W-FRI
+
+<span style="color:var(--text-muted);"># 板块轮动 (月频)</span>
+python -m trading_platform.runtime.backtest \
+    --start 2018-01-01 --end 2024-12-31 \
+    --strategy rotation --rebalance M
+
+<span style="color:var(--text-muted);"># 配对交易 (先扫描协整对, 再回测)</span>
+python -m trading_platform.runtime.pairs_scanner \
+    --start 2020-01-01 --end 2024-01-01 --p 0.05
+python -m trading_platform.runtime.backtest \
+    --start 2024-01-01 --end 2025-12-31 \
+    --strategy pairs</code></pre>
+
+    <h3>Shadow &rarr; Paper &rarr; Live (渐进上线)</h3>
+    <pre><code><span style="color:var(--text-muted);"># Step 1: Shadow &mdash; 连 IBKR 实时数据, 不发单 (&ge;1 周)</span>
+python -m trading_platform.runtime.live --mode shadow \
+    --strategy timing --symbols AAPL --rule HHT --bar-size '5 mins'
+
+<span style="color:var(--text-muted);"># Step 2: Paper &mdash; IBKR 模拟盘下单 (&ge;2 周)</span>
+python -m trading_platform.runtime.live --mode paper --port 7497 \
+    --strategy timing --symbols AAPL --rule HHT --bar-size '5 mins'
+
+<span style="color:var(--text-muted);"># Step 3: Live &mdash; 真实资金, 需显式确认</span>
+python -m trading_platform.runtime.live --mode live --port 7496 \
+    --strategy timing --symbols AAPL --rule HHT \
+    --initial-capital 5000 --max-leverage 0.5 --max-daily-loss 0.01 \
+    --i-understand-this-uses-real-money</code></pre>
+  </div>
+</section>
+
+<!-- ============================================== EXTEND ============================================== -->
+<section id="extend">
+  <div class="container">
+    <h2><span class="icon" style="background:rgba(188,140,255,0.15);">+</span> 扩展策略</h2>
+    <p class="section-desc">继承 <code>Alpha</code> + <code>ScalingMixin</code>，实现 <code>forecast()</code> 即可。</p>
+
+    <pre><code><span style="color:var(--accent5);">from</span> trading_platform.strategy <span style="color:var(--accent5);">import</span> Alpha, ScalingMixin
+
+<span style="color:var(--accent5);">class</span> <span style="color:var(--accent2);">MyCustomAlpha</span>(Alpha, ScalingMixin):
+    trigger_freq = Frequency.EOD
+
+    <span style="color:var(--accent5);">def</span> <span style="color:var(--accent);">__init__</span>(self):
+        <span style="color:var(--accent5);">super</span>().__init__()
+        self._init_scaling(window=<span style="color:var(--accent3);">252</span>)
+
+    <span style="color:var(--accent5);">def</span> <span style="color:var(--accent);">forecast</span>(self, dt, ctx):
+        prices = ctx.as_of(dt, <span style="color:var(--accent3);">"price_1d"</span>, lookback=<span style="color:var(--accent3);">60</span>)
+        raw = {}
+        <span style="color:var(--accent5);">for</span> sym <span style="color:var(--accent5);">in</span> self.universe(dt, ctx):
+            raw[sym] = your_signal_logic(prices[sym])
+        <span style="color:var(--accent5);">return</span> self._scale_and_cap(raw)  <span style="color:var(--text-muted);"># &rarr; [-20, +20]</span></code></pre>
+
+    <h3>Templates</h3>
+    <table>
+      <thead><tr><th>Template</th><th>Use Case</th></tr></thead>
+      <tbody>
+        <tr><td><code>templates/timing_template.py</code></td><td>Custom timing rule (beyond HHT/QRS/MA/RSI)</td></tr>
+        <tr><td><code>templates/cross_section_template.py</code></td><td>Add new alpha factors to multi-factor library</td></tr>
+        <tr><td><code>templates/pairs_template.py</code></td><td>Custom pair signal (beyond Engle-Granger)</td></tr>
+        <tr><td><code>templates/rotation_template.py</code></td><td>Custom rotation rule (e.g., mean-reversion sector)</td></tr>
+        <tr><td><code>templates/multi_strategy_composite.py</code></td><td>Combine multiple alphas via LayeredCombiner</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================== FOOTER ============================================== -->
+<footer>
+  <p>
+    <strong>trading_platform</strong> v0.1.0 &mdash;
+    based on Robert Carver,
+    <em>Systematic Trading</em> (2015)
+  </p>
+  <p style="margin-top: 4px;">Broker: Interactive Brokers (IBKR) via ib_insync &mdash; US Equities &amp; ETFs &mdash; SMART/USD routing</p>
+</footer>
+
+</body>
+</html>

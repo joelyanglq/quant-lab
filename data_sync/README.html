@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>data_sync — Market Data ETL Pipeline</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #333; line-height: 1.6; }
+  h1 { border-bottom: 2px solid #2563eb; padding-bottom: 8px; }
+  h2 { color: #1e40af; margin-top: 2em; }
+  h3 { color: #374151; }
+  code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+  pre { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 0.85em; }
+  pre code { background: none; padding: 0; color: inherit; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; }
+  th { background: #f1f5f9; font-weight: 600; }
+  .tip { background: #dbeafe; border-left: 4px solid #2563eb; padding: 12px 16px; margin: 1em 0; border-radius: 0 4px 4px 0; }
+  .warn { background: #fef3c7; border-left: 4px solid #d97706; padding: 12px 16px; margin: 1em 0; border-radius: 0 4px 4px 0; }
+  .tag { display: inline-block; background: #2563eb; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; }
+</style>
+</head>
+<body>
+
+<h1>data_sync</h1>
+<p>Standalone market data ETL pipeline. Fetch, store, and monitor financial data from FMP (Financial Modeling Prep).</p>
+
+<h2>Quick Start</h2>
+
+<h3>1. Install Dependencies</h3>
+<pre><code>pip install pyyaml pandas pyarrow requests rich</code></pre>
+
+<h3>2. Configure</h3>
+<p>Edit <code>data_sync/config.yaml</code>:</p>
+<ul>
+  <li>Set your FMP API key</li>
+  <li>Adjust <code>storage.root</code> if needed (default: <code>../data</code> relative to config file)</li>
+</ul>
+
+<div class="warn">
+  <strong>config.yaml contains API keys!</strong> Make sure it's in <code>.gitignore</code>.
+</div>
+
+<h3>3. First Sync</h3>
+<pre><code># Run from quant-lab/ directory
+cd D:\04_Project\quant-lab
+
+# Sync universe first (provides symbol lists for other providers)
+python -m data_sync sync --only universe
+
+# Then sync daily bars
+python -m data_sync sync --only prices_1d --from 2024-01-01
+
+# Check status
+python -m data_sync status</code></pre>
+
+<h2>CLI Reference</h2>
+
+<h3><code>status</code> — Check sync progress</h3>
+<pre><code># Overview of all providers
+python -m data_sync status
+
+# Detail for one provider
+python -m data_sync status --provider prices_1d
+
+# Per-symbol detail
+python -m data_sync status --provider prices_1min --symbols AAPL,MSFT
+
+# Show stale symbols (not updated in N days)
+python -m data_sync status --provider financials --stale 30</code></pre>
+
+<h3><code>sync</code> — Run data sync</h3>
+<pre><code># Incremental update all providers
+python -m data_sync sync
+
+# Only specific providers
+python -m data_sync sync --only prices_1d financials
+
+# Historical backfill
+python -m data_sync sync --only prices_1d --from 2018-01-01
+
+# Specific symbols
+python -m data_sync sync --only financials --symbols AAPL,MSFT,GOOGL
+
+# Limit symbols per run (for resumable partial syncs)
+python -m data_sync sync --only prices_1min --limit 50
+
+# Force re-fetch (ignore staleness checks)
+python -m data_sync sync --only financials --force
+
+# Use alternate config (e.g., E:/stocks storage)
+python -m data_sync --config data_sync/config_estocks.yaml sync</code></pre>
+
+<h3><code>dry-run</code> — Preview without API calls</h3>
+<pre><code>python -m data_sync dry-run --only prices_1d</code></pre>
+
+<h2>Data Sources</h2>
+
+<table>
+  <tr><th>Provider</th><th>Description</th><th>API Endpoint</th><th>Update Strategy</th></tr>
+  <tr>
+    <td><code>universe</code></td>
+    <td>Stock list, company profiles, index constituents (SP500, Nasdaq)</td>
+    <td><code>/stock-list</code>, <code>/profile</code>, <code>/sp500-constituent</code></td>
+    <td>Full overwrite</td>
+  </tr>
+  <tr>
+    <td><code>prices_1d</code></td>
+    <td>Daily OHLCV bars, full market</td>
+    <td><code>/eod-bulk?date=YYYY-MM-DD</code></td>
+    <td>Incremental by date (1 API call = 1 day, all symbols)</td>
+  </tr>
+  <tr>
+    <td><code>prices_1min</code></td>
+    <td>1-minute intraday bars</td>
+    <td><code>/historical-chart/1min?symbol=X</code></td>
+    <td>Per-symbol incremental. Concurrent (8 workers). Use <code>--limit</code> for partial runs.</td>
+  </tr>
+  <tr>
+    <td><code>financials</code></td>
+    <td>Income statement, balance sheet, cash flow</td>
+    <td><code>/income-statement</code>, <code>/balance-sheet-statement</code>, <code>/cash-flow-statement</code></td>
+    <td>Per-symbol, 30-day staleness. Concurrent (6 workers).</td>
+  </tr>
+  <tr>
+    <td><code>analysts</code></td>
+    <td>Analyst consensus estimates</td>
+    <td><code>/analyst-estimates</code></td>
+    <td>Per-symbol, 7-day staleness. Append mode (historical snapshots). Concurrent (6 workers).</td>
+  </tr>
+</table>
+
+<h2>Provider Execution Order</h2>
+<p>When running all providers: <code>universe → prices_1d → prices_1min → financials → analysts</code></p>
+<p><code>universe</code> runs first because it provides the symbol lists used by other providers.</p>
+
+<h2>Config Reference</h2>
+
+<pre><code># config.yaml
+api_keys:
+  fmp: "YOUR_KEY_HERE"
+
+providers:
+  prices_1d:
+    source: fmp
+    bulk: true
+  prices_1min:
+    source: fmp
+    symbols: rus1000           # rus1000 | index | sp500 | nasdaq | all
+  financials:
+    source: fmp
+    symbols: rus1000           # Can also use unions like index+rus1000
+    update_interval_days: 30    # Staleness threshold
+  analysts:
+    source: fmp
+    symbols: rus1000
+    update_interval_days: 7
+  universe:
+    source: fmp
+
+storage:
+  root: "../data"               # Relative to this file
+  prices_1d: "processed/bars_1d"
+  prices_1min: "processed/bars_1min"
+  financials: "processed/financials"
+  analysts: "processed/analysts"
+  universe: "processed/universe"
+
+rate_limits:
+  fmp: 3000                     # Requests per minute</code></pre>
+
+<h3>Symbol Selectors</h3>
+<ul>
+  <li><code>index</code> — SP500 ∪ Nasdaq 100</li>
+  <li><code>sp500</code> — SP500 only</li>
+  <li><code>nasdaq</code> / <code>ndx100</code> — Nasdaq 100 only</li>
+  <li><code>all</code> — full active stock list</li>
+  <li><code>rus1000</code> — fixed symbol list stored in <code>universe/symbol_layer_rus1000.json</code></li>
+  <li>Union syntax: <code>index+rus1000</code> or <code>sp500,rus1000</code></li>
+</ul>
+
+<p><strong>Important:</strong> <code>rus1000</code> is treated as a fixed list. Normal sync runs do not rebuild it.</p>
+<p><code>python -m data_sync.build_symbol_layers</code> is only a manual re-bootstrap tool, and it does <strong>not</strong> call FMP or refresh SP500/Nasdaq constituents. It only scans existing monthly parquet files in <code>bars_1min/</code>.</p>
+<h2>Storage Layout</h2>
+<pre><code>data/processed/
+├── bars_1d/          # {year}_1d.parquet (e.g., 2024_1d.parquet)
+├── bars_1min/        # {year}_1m.parquet + _sync_progress.json
+├── financials/       # financials.parquet (single file, all symbols)
+├── analysts/         # estimates.parquet (append mode, historical snapshots)
+├── universe/         # stock_list.parquet, profiles.parquet, index_*.parquet
+└── _sync_status.db   # SQLite progress tracking</code></pre>
+
+<h2>Status Tracking</h2>
+<p>Progress is tracked in <code>_sync_status.db</code> (SQLite), updated after each symbol sync. This makes <code>status</code> queries instant without scanning parquet files.</p>
+
+<div class="tip">
+  <strong>Tip:</strong> Use <code>--limit</code> for long-running providers like <code>prices_1min</code>:<br>
+  <code>python -m data_sync sync --only prices_1min --limit 100</code><br>
+  Run this daily — each run picks up where the previous one stopped.
+</div>
+
+<h2>Troubleshooting</h2>
+
+<table>
+  <tr><th>Problem</th><th>Solution</th></tr>
+  <tr>
+    <td><code>FileNotFoundError: Config file not found</code></td>
+    <td>Run from <code>quant-lab/</code> directory, or use <code>--config</code> flag</td>
+  </tr>
+  <tr>
+    <td><code>No API key configured for source: fmp</code></td>
+    <td>Edit <code>data_sync/config.yaml</code> and add your FMP key</td>
+  </tr>
+  <tr>
+    <td><code>HTTP 429</code> rate limit errors</td>
+    <td>Built-in retry handles this. If persistent, reduce <code>rate_limits.fmp</code> in config</td>
+  </tr>
+  <tr>
+    <td>Sync interrupted / incomplete</td>
+    <td>Just re-run. Progress is saved per-symbol — it resumes from where it stopped</td>
+  </tr>
+  <tr>
+    <td><code>ModuleNotFoundError: No module named 'rich'</code></td>
+    <td><code>pip install rich</code></td>
+  </tr>
+  <tr>
+    <td>Want to use different storage location</td>
+    <td>Use <code>--config data_sync/config_estocks.yaml</code> or edit <code>storage.root</code> in config</td>
+  </tr>
+</table>
+
+<h2>Architecture</h2>
+<pre><code>
+CLI (cli.py)
+  ├── config.yaml → ETLConfig (config.py)
+  ├── StatusManager (status.py) → _sync_status.db
+  └── Providers (providers/)
+        ├── Provider ABC (base.py)
+        ├── FMPClient (client/fmp.py) → FMP API
+        └── ParquetStorage (storage/parquet.py) → .parquet files
+</code></pre>
+
+</body>
+</html>

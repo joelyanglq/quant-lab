@@ -186,6 +186,7 @@ def compute_selected_factors(
             storage_1min = None
 
         if storage_1min is not None:
+            # Compute factors that use close_1m + vol_1m pivots
             factor_groups = [
                 ('surge', lambda: compute_surge_factors(close_1m, vol_1m)),
                 ('regression', lambda: compute_regression_factors(close_1m, vol_1m)),
@@ -204,6 +205,7 @@ def compute_selected_factors(
                 except Exception as e:
                     print(f'SKIP ({e})')
 
+            # Rebuild factors need 5 OHLCV pivots from raw_1m
             print(f'  Computing rebuild ...', end=' ')
             t0 = time.time()
             try:
@@ -211,10 +213,14 @@ def compute_selected_factors(
                 for f in ['open', 'high', 'low', 'close', 'volume']:
                     panels_1m[f] = raw_1m.pivot_table(
                         index=raw_1m.index, columns='symbol', values=f)
+                del raw_1m  # free raw long-table before computing
                 all_factors.update(compute_rebuild_factors(panels_1m))
+                del panels_1m
                 print(f'{time.time()-t0:.1f}s')
             except Exception as e:
                 print(f'SKIP ({e})')
+
+            del close_1m, vol_1m  # free pivot tables
 
     # 只保留 registry 中 active 的因子
     computed = {k: v for k, v in all_factors.items() if k in target_names}
@@ -355,7 +361,7 @@ def main():
     parser.add_argument('--no-neutralize', action='store_true',
                         help='Skip sector neutralization for fundamental factors')
     parser.add_argument('--start-1min', type=str, default=None,
-                        help='1min data start (default: use full 1d range)')
+                        help='1min data start (default: last 60 calendar days)')
     args = parser.parse_args()
 
     warnings.filterwarnings('ignore', 'Mean of empty slice')
@@ -390,14 +396,17 @@ def main():
     volume = prices['volume']
     print(f'  1d bars: {close.shape[0]} days x {close.shape[1]} symbols  ({time.time()-t0:.1f}s)')
 
-    # 1min storage
+    # 1min storage — only load recent data (1min factors need ≤40 trading days)
     storage_1min = None
     start_1min = args.start_1min
     end_1min = None
     if use_1min and BARS_1MIN_DIR.exists():
         storage_1min = ParquetStorage(str(BARS_1MIN_DIR))
         if start_1min is None:
-            start_1min = close.index[0].strftime('%Y-%m-%d')
+            # 1min factors: max lookback is 40 trading days (microstructure)
+            # 60 calendar days covers ~40 trading days with margin
+            from datetime import timedelta
+            start_1min = (close.index[-1] - timedelta(days=60)).strftime('%Y-%m-%d')
         end_1min = close.index[-1].strftime('%Y-%m-%d')
         print(f'  1min range: {start_1min} ~ {end_1min}')
     elif use_1min:

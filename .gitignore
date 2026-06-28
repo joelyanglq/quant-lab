@@ -2,3 +2,9 @@ data/
 output/
 *.pyc
 analysis/
+**/config.yaml
+**/config_estocks.yaml
+openspec
+.claude/
+.playwright-mcp/
+2026-02-26-030354-this-session-is-being-continued-from-a-previous-co.txt

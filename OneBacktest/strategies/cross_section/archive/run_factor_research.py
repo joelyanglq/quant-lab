@@ -45,19 +45,19 @@ from strategies.cross_section.factors import (
     compute_reversal_factors,
     compute_fundamental_factors,
 )
-from strategies.cross_section.diagnostics import (
+from OneBacktest.strategies.cross_section.archive.diagnostics import (
     run_diagnostics,
     run_batch_diagnostics,
     build_style_factor_proxies,
     format_diagnostic_report,
 )
-from strategies.cross_section.alpha_test import (
+from OneBacktest.strategies.cross_section.archive.alpha_test import (
     run_alpha_test,
     run_batch_alpha_test,
     load_gics_sectors,
     format_alpha_test_report,
 )
-from strategies.cross_section.diagnostics_plotting import (
+from OneBacktest.strategies.cross_section.archive.diagnostics_plotting import (
     plot_diagnostic_summary,
     plot_alpha_test_summary,
     plot_ic_decay_curve,
@@ -75,8 +75,8 @@ def parse_args():
     parser.add_argument('--factor', type=str, default=None,
                         help='单因子名 (不传=所有 1d 因子)')
     parser.add_argument('--stage', type=str, default='all',
-                        choices=['all', 'diagnostics', 'alpha'],
-                        help='执行阶段')
+                        choices=['all', 'diagnostics', 'alpha', 'eval'],
+                        help='执行阶段 (eval=新版四步评估)')
     parser.add_argument('--start', type=str, default='2020-01-01')
     parser.add_argument('--end', type=str, default='2026-12-31')
     parser.add_argument('--n-symbols', type=int, default=0,
@@ -85,6 +85,13 @@ def parse_args():
                         help='调仓频率 (M, W-FRI, Q)')
     parser.add_argument('--horizons', type=str, default='1,5,21,63',
                         help='IC horizons (逗号分隔)')
+    parser.add_argument('--horizon', type=int, default=None,
+                        help='手动指定评估 horizon (None=IC分析自动选择)')
+    parser.add_argument('--preprocess', type=str, default='mad_zscore',
+                        choices=['mad_zscore', 'rank_zscore', 'none'],
+                        help='预处理方法')
+    parser.add_argument('--no-neutralize', action='store_true',
+                        help='跳过行业/市值中性化')
     parser.add_argument('--transaction-cost', type=float, default=10.0,
                         help='单边交易成本 (bps)')
     parser.add_argument('--no-fama-macbeth', action='store_true',
@@ -194,10 +201,52 @@ def main():
         all_factors = {args.factor: all_factors[args.factor]}
 
     # ═══════════════════════════════════════════════════════════
+    # Stage: eval (新版四步评估)
+    # ═══════════════════════════════════════════════════════════
+    if args.stage == 'eval':
+        from strategies.cross_section.eval import run_factor_eval
+        from OneBacktest.strategies.cross_section.archive.neutralize import load_gics_sector_map
+
+        # 预处理
+        sector_map = load_gics_sector_map()
+        mktcap = None
+        if shares is not None:
+            mktcap = close * shares
+
+        if args.preprocess != 'none':
+            from strategies.cross_section.preprocessing import preprocess_factor
+            print(f'\n  Preprocessing: {args.preprocess}, neutralize={not args.no_neutralize}')
+            processed_factors = {}
+            for name, fac in all_factors.items():
+                processed_factors[name] = preprocess_factor(
+                    fac, method=args.preprocess,
+                    neutralize=not args.no_neutralize,
+                    mktcap=mktcap, sector_map=sector_map,
+                )
+            all_factors = processed_factors
+
+        # 评估
+        for name, fac in all_factors.items():
+            run_factor_eval(
+                fac, close,
+                factor_name=name,
+                horizons=horizons,
+                horizon=args.horizon,
+                rebalance_freq=args.rebalance_freq,
+                sector_map=sector_map,
+                benchmark_close=spy_close,
+                save_dir=str(output_dir),
+                plot=not args.no_plot,
+            )
+
+        print('\nDone.')
+        return
+
+    # ═══════════════════════════════════════════════════════════
     # Step 3: 质量诊断
     # ═══════════════════════════════════════════════════════════
     diag_reports = {}
-    if args.stage in ('all', 'diagnostics'):
+    if args.stage in ('all', 'diagnostics'):        
         print('\nStep 3: Factor Diagnostics...')
         t0 = time.time()
 
