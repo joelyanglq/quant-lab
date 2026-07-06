@@ -1,0 +1,103 @@
+# ETF Valuation Universe
+# Each ETF is assigned a primary and optional secondary valuation metric.
+# Metrics: pe_ttm, pb_lf, ps_ttm, div_yield, erp, fcf_yield, ev_ebitda
+# Direction: "higher_expensive" (PE/PB/PS/EV_EBITDA) or "higher_cheap" (DivYield/ERP/FCF)
+
+storage_root: "E:/stocks/etf_valuation"
+
+storage:
+  nport: "nport"
+  ratios_bulk: "ratios_bulk"
+  treasury: "treasury"
+  snapshots: "snapshots"
+  shiller: "shiller"
+  cusip_cache: "cusip_cache"
+
+percentile:
+  window_years: 5
+  min_observations: 60  # ~3 months of trading days
+
+scoring:
+  composite_weights:
+    primary: 0.7
+    secondary: 0.3
+
+tiers:
+  broad:
+    label: "宽基"
+    etfs:
+      SPY: {name: "S&P 500",          primary: pe_ttm, secondary: erp}
+      QQQ: {name: "Nasdaq 100",       primary: pe_ttm, secondary: ps_ttm}
+      VTI: {name: "Total US Market",  primary: pe_ttm, secondary: erp}
+      IWM: {name: "Russell 2000",     primary: pe_ttm, secondary: pb_lf}
+      IJH: {name: "S&P MidCap 400",   primary: pe_ttm, secondary: pb_lf}
+      DIA: {name: "Dow 30",           primary: pe_ttm, secondary: div_yield}
+
+  sectors:
+    label: "GICS行业"
+    etfs:
+      XLK:  {name: "科技",       primary: pe_ttm, secondary: fcf_yield}
+      XLF:  {name: "金融",       primary: pb_lf,  secondary: erp}
+      XLV:  {name: "医疗保健",   primary: pe_ttm, secondary: ps_ttm}
+      XLY:  {name: "可选消费",   primary: pe_ttm, secondary: fcf_yield}
+      XLP:  {name: "必需消费",   primary: pe_ttm, secondary: div_yield}
+      XLE:  {name: "能源",       primary: pe_ttm, secondary: ev_ebitda}
+      XLI:  {name: "工业",       primary: pe_ttm, secondary: ev_ebitda}
+      XLU:  {name: "公用事业",   primary: pe_ttm, secondary: div_yield}
+      XLB:  {name: "材料",       primary: pb_lf,  secondary: ev_ebitda}
+      XLRE: {name: "房地产",     primary: pb_lf,  secondary: div_yield}
+      XLC:  {name: "通信服务",   primary: pe_ttm, secondary: ps_ttm}
+
+  themes:
+    label: "子行业/主题"
+    etfs:
+      SMH:  {name: "半导体",       primary: pb_lf,    secondary: pe_ttm}
+      IBB:  {name: "生物科技",     primary: ps_ttm,   secondary: pb_lf}
+      XBI:  {name: "生物科技(等权)", primary: ps_ttm,  secondary: pb_lf}
+      HACK: {name: "网络安全",     primary: ps_ttm,   secondary: pe_ttm}
+      ICLN: {name: "清洁能源",     primary: ps_ttm,   secondary: pb_lf}
+      BOTZ: {name: "AI/机器人",    primary: ps_ttm,   secondary: pe_ttm}
+      KRE:  {name: "区域银行",     primary: pb_lf,    secondary: erp}
+      XOP:  {name: "油气勘探",     primary: ev_ebitda, secondary: pe_ttm}
+      IYR:  {name: "美国地产",     primary: pb_lf,    secondary: div_yield}
+      XHB:  {name: "住宅建筑",     primary: pe_ttm,   secondary: pb_lf}
+      ITB:  {name: "住房建设",     primary: pe_ttm,   secondary: pb_lf}
+      ARKK: {name: "颠覆创新",     primary: ps_ttm,   secondary: null}
+      TAN:  {name: "太阳能",       primary: ps_ttm,   secondary: pb_lf}
+      IBIT: {name: "比特币现货",   primary: null,     secondary: null}
+
+  factors:
+    label: "因子/策略"
+    etfs:
+      VIG:  {name: "股息成长", primary: div_yield, secondary: pe_ttm}
+      SCHD: {name: "股息质量", primary: div_yield, secondary: fcf_yield}
+      DVY:  {name: "高股息",   primary: div_yield, secondary: pe_ttm}
+      VTV:  {name: "价值",     primary: pe_ttm,    secondary: pb_lf}
+      VUG:  {name: "成长",     primary: pe_ttm,    secondary: ps_ttm}
+      MTUM: {name: "动量",     primary: pe_ttm,    secondary: null}
+      USMV: {name: "低波",     primary: pe_ttm,    secondary: div_yield}
+      QUAL: {name: "质量",     primary: pe_ttm,    secondary: fcf_yield}
+
+  international:
+    label: "国际"
+    etfs:
+      EFA:  {name: "发达除美",     primary: pe_ttm, secondary: pb_lf}
+      EEM:  {name: "新兴市场",     primary: pe_ttm, secondary: pb_lf}
+      FXI:  {name: "中国大盘",     primary: pe_ttm, secondary: pb_lf}
+      EWJ:  {name: "日本",         primary: pb_lf,  secondary: pe_ttm}
+      INDA: {name: "印度",         primary: pe_ttm, secondary: null}
+      VWO:  {name: "新兴(Vanguard)", primary: pe_ttm, secondary: pb_lf}
+
+  bonds:
+    label: "债券"
+    etfs:
+      AGG: {name: "综合债",       primary: null, secondary: null}
+      TLT: {name: "20+年国债",    primary: null, secondary: null}
+      HYG: {name: "高收益债",     primary: null, secondary: null}
+      LQD: {name: "投资级企业债", primary: null, secondary: null}
+
+  commodities:
+    label: "商品"
+    etfs:
+      GLD: {name: "黄金", primary: null, secondary: null}
+      USO: {name: "原油", primary: null, secondary: null}

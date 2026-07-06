@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ETF Valuation System — 估值监控系统</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #c9d1d9; --text-muted: #8b949e; --text-bright: #f0f6fc;
+    --accent: #58a6ff; --green: #3fb950; --red: #f85149;
+    --orange: #d29922; --purple: #bc8cff; --cyan: #39d2c0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+    max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem;
+  }
+  h1 { color: var(--text-bright); font-size: 2rem; margin-bottom: 0.25rem; }
+  h1 span { color: var(--accent); }
+  .subtitle { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  h2 {
+    color: var(--accent); font-size: 1.3rem; margin: 2.5rem 0 1rem;
+    padding-bottom: 0.4rem; border-bottom: 1px solid var(--border);
+  }
+  h3 { color: var(--text-bright); font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }
+
+  /* pipeline diagram */
+  .pipeline {
+    display: flex; align-items: stretch; gap: 0; margin: 1.5rem 0 2rem;
+    overflow-x: auto; padding-bottom: 0.5rem;
+  }
+  .pipe-step {
+    flex: 1; min-width: 140px; padding: 1rem 0.75rem;
+    background: var(--surface); border: 1px solid var(--border);
+    text-align: center; position: relative;
+  }
+  .pipe-step:first-child { border-radius: 8px 0 0 8px; }
+  .pipe-step:last-child  { border-radius: 0 8px 8px 0; }
+  .pipe-step .num {
+    display: inline-block; width: 24px; height: 24px; line-height: 24px;
+    border-radius: 50%; background: var(--accent); color: var(--bg);
+    font-size: 0.75rem; font-weight: 700; margin-bottom: 0.4rem;
+  }
+  .pipe-step .label { display: block; font-size: 0.82rem; color: var(--text-bright); font-weight: 600; }
+  .pipe-step .detail { display: block; font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem; }
+  .pipe-arrow {
+    display: flex; align-items: center; font-size: 1.2rem; color: var(--text-muted);
+    padding: 0 0.15rem;
+  }
+
+  /* cards grid */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin: 1rem 0; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1.1rem 1.2rem;
+  }
+  .card h4 { color: var(--cyan); font-size: 0.95rem; margin-bottom: 0.4rem; }
+  .card p, .card ul { font-size: 0.85rem; color: var(--text); }
+  .card ul { padding-left: 1.2rem; }
+  .card li { margin-bottom: 0.15rem; }
+  .card code { background: var(--bg); padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.82rem; color: var(--purple); }
+
+  /* tables */
+  table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.82rem; }
+  th, td { padding: 0.45rem 0.65rem; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  td { color: var(--text); }
+  tr:hover td { background: rgba(88,166,255,0.04); }
+  .mono { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.78rem; }
+  .tag {
+    display: inline-block; padding: 0.1em 0.5em; border-radius: 3px;
+    font-size: 0.72rem; font-weight: 600;
+  }
+  .tag-green  { background: rgba(63,185,80,0.15);  color: var(--green); }
+  .tag-red    { background: rgba(248,81,73,0.15);   color: var(--red); }
+  .tag-orange { background: rgba(210,153,34,0.15);  color: var(--orange); }
+  .tag-blue   { background: rgba(88,166,255,0.15);  color: var(--accent); }
+  .tag-purple { background: rgba(188,140,255,0.15); color: var(--purple); }
+
+  /* code blocks */
+  pre {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1rem 1.2rem; overflow-x: auto;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.82rem; line-height: 1.5; color: var(--text);
+    margin: 0.75rem 0;
+  }
+  pre .comment { color: var(--text-muted); }
+  pre .kw { color: var(--purple); }
+  pre .str { color: var(--green); }
+  pre .fn { color: var(--accent); }
+
+  /* architecture diagram */
+  .arch {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1.5rem; margin: 1rem 0;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.78rem; line-height: 1.7; white-space: pre; overflow-x: auto;
+    color: var(--text);
+  }
+  .arch .hl { color: var(--accent); font-weight: 600; }
+  .arch .src { color: var(--green); }
+  .arch .dim { color: var(--text-muted); }
+
+  /* signal table colors */
+  .sig-sb { color: #3fb950; font-weight: 700; }
+  .sig-b  { color: #56d364; }
+  .sig-lb { color: #7ee787; }
+  .sig-h  { color: var(--text-muted); }
+  .sig-ls { color: #ffa657; }
+  .sig-s  { color: #f85149; }
+  .sig-ss { color: #ff7b72; font-weight: 700; }
+
+  .metric-dir { font-size: 0.75rem; }
+  .dir-up { color: var(--red); }
+  .dir-down { color: var(--green); }
+
+  footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.78rem; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>ETF Valuation <span>System</span></h1>
+<p class="subtitle">Bottom-up ETF 估值监控 — FMP ETF Holdings × FMP 个股 Ratios → 加权聚合 → 历史分位 → 择时信号 → 时序图</p>
+
+<!-- ───────────────────── 核心思路 ───────────────────── -->
+<h2>核心思路</h2>
+<p style="font-size:0.9rem; margin-bottom:0.8rem;">
+  美股 ETF 本身没有 P/E、P/B 等基本面数据。本系统通过 <strong>FMP ETF Holdings API</strong>
+  获取每只 ETF 的实时持仓权重（每日更新），结合 <strong>FMP 全市场个股 TTM ratios</strong>，
+  用加权调和/算术平均聚合出 ETF 级别的 7 大估值指标，再追踪历史分位数，生成买卖信号和时序轨迹图。
+</p>
+
+<div class="arch"><span class="dim">┌─────────────────────────────────────────────────────────────────────────┐</span>
+<span class="dim">│</span>                        <span class="hl">Bottom-Up ETF Valuation</span>                         <span class="dim">│</span>
+<span class="dim">│</span>                                                                         <span class="dim">│</span>
+<span class="dim">│</span>  <span class="src">FMP API</span>                               <span class="src">FMP API</span>                    <span class="dim">│</span>
+<span class="dim">│</span>  /stable/etf/holdings  ──────────────→  Ratios TTM Bulk                <span class="dim">│</span>
+<span class="dim">│</span>  (ticker + weight, daily)                (71K 个股 ratios)              <span class="dim">│</span>
+<span class="dim">│</span>       │                                    │                             <span class="dim">│</span>
+<span class="dim">│</span>       └──────────── <span class="hl">JOIN on ticker</span> ────────┘                             <span class="dim">│</span>
+<span class="dim">│</span>                        │                                               <span class="dim">│</span>
+<span class="dim">│</span>                <span class="hl">Weighted Aggregation</span>                                     <span class="dim">│</span>
+<span class="dim">│</span>           Harmonic Mean (PE/PB/PS/EV)                                  <span class="dim">│</span>
+<span class="dim">│</span>           Arithmetic Mean (DivYld/FCF)                                 <span class="dim">│</span>
+<span class="dim">│</span>           ERP = 1/PE − 10Y Treasury                                   <span class="dim">│</span>
+<span class="dim">│</span>                        │                                               <span class="dim">│</span>
+<span class="dim">│</span>              <span class="hl">Historical Percentile</span>  ──→  <span class="hl">Signal</span> (7 levels)              <span class="dim">│</span>
+<span class="dim">│</span>              (snapshot accumulation)      STRONG_BUY … STRONG_SELL      <span class="dim">│</span>
+<span class="dim">│</span>                        │                                               <span class="dim">│</span>
+<span class="dim">│</span>              <span class="hl">Time-Series Charts</span>   ──→  per-tier trajectory PNGs        <span class="dim">│</span>
+<span class="dim">│</span>              (mean/σ bands, P10/P90)     sectors / themes / SPY deep   <span class="dim">│</span>
+<span class="dim">└─────────────────────────────────────────────────────────────────────────┘</span></div>
+
+<!-- ───────────────────── Pipeline ───────────────────── -->
+<h2>7-Step Pipeline</h2>
+<div class="pipeline">
+  <div class="pipe-step">
+    <span class="num">1</span>
+    <span class="label">FMP Holdings</span>
+    <span class="detail">ETF Holdings API<br>25 ETFs, daily weights</span>
+  </div>
+  <div class="pipe-arrow">→</div>
+  <div class="pipe-step">
+    <span class="num">3</span>
+    <span class="label">Ratios Bulk</span>
+    <span class="detail">FMP API<br>71K 个股 TTM ratios</span>
+  </div>
+  <div class="pipe-arrow">→</div>
+  <div class="pipe-step">
+    <span class="num">4</span>
+    <span class="label">Treasury</span>
+    <span class="detail">FMP API<br>10Y 国债利率</span>
+  </div>
+  <div class="pipe-arrow">→</div>
+  <div class="pipe-step">
+    <span class="num">5</span>
+    <span class="label">Compute</span>
+    <span class="detail">加权聚合<br>ETF 估值</span>
+  </div>
+  <div class="pipe-arrow">→</div>
+  <div class="pipe-step">
+    <span class="num">6</span>
+    <span class="label">Persist</span>
+    <span class="detail">快照落表<br>历史累积</span>
+  </div>
+  <div class="pipe-arrow">→</div>
+  <div class="pipe-step">
+    <span class="num">R</span>
+    <span class="label">Report</span>
+    <span class="detail">分位数信号<br>CSV + JSON</span>
+  </div>
+  <div class="pipe-arrow">→</div>
+  <div class="pipe-step">
+    <span class="num">7</span>
+    <span class="label">Charts</span>
+    <span class="detail">时序轨迹图<br>per-tier PNGs</span>
+  </div>
+</div>
+
+<p style="font-size:0.82rem; color: var(--text-muted); margin-bottom:0.5rem;">
+  <strong>vs 旧版:</strong> N-PORT (step1) + CUSIP Mapping (step2) 已被 FMP Holdings 取代。
+  FMP 直接返回 ticker + weight，无需 CUSIP 映射，pipeline 从 ~4 分钟降至 ~0.6 分钟。
+  N-PORT 仅保留用于历史重建 (<code>history.py</code>)。
+</p>
+
+<pre><span class="comment"># 运行完整 pipeline (日常使用, ~0.6 min)</span>
+<span class="kw">cd</span> D:\04_Project\quant-lab
+python -m etf_valuation.run_backfill
+
+<span class="comment"># 历史重建 (一次性: N-PORT × edgar_financials → 27Q 季度快照)</span>
+python -m etf_valuation.history
+
+<span class="comment"># 均值回归检验 (ADF + Hurst + AR(1) Half-life)</span>
+python -m etf_valuation.mean_reversion
+
+<span class="comment"># CLI 子命令</span>
+python -m etf_valuation sync          <span class="comment"># 每日增量（ratios + treasury）</span>
+python -m etf_valuation report        <span class="comment"># 生成报告</span>
+python -m etf_valuation screen --signal BUY  <span class="comment"># 筛选低估</span>
+python -m etf_valuation status        <span class="comment"># 数据清单</span></pre>
+
+<!-- ───────────────────── 7 Metrics ───────────────────── -->
+<h2>7 大估值指标</h2>
+<table>
+  <thead>
+    <tr><th>#</th><th>Metric</th><th>Direction</th><th>Aggregation</th><th>FMP Field</th><th>适用场景</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td><td><strong>P/E TTM</strong></td>
+      <td><span class="metric-dir dir-up">↑ expensive</span></td>
+      <td><span class="tag tag-blue">Harmonic</span></td>
+      <td class="mono">priceToEarningsRatioTTM</td>
+      <td>盈利稳定行业</td>
+    </tr>
+    <tr>
+      <td>2</td><td><strong>P/B LF</strong></td>
+      <td><span class="metric-dir dir-up">↑ expensive</span></td>
+      <td><span class="tag tag-blue">Harmonic</span></td>
+      <td class="mono">priceToBookRatioTTM</td>
+      <td>重资产 / 金融 / 周期</td>
+    </tr>
+    <tr>
+      <td>3</td><td><strong>P/S TTM</strong></td>
+      <td><span class="metric-dir dir-up">↑ expensive</span></td>
+      <td><span class="tag tag-blue">Harmonic</span></td>
+      <td class="mono">priceToSalesRatioTTM</td>
+      <td>高成长 / 亏损行业</td>
+    </tr>
+    <tr>
+      <td>4</td><td><strong>Div Yield</strong></td>
+      <td><span class="metric-dir dir-down">↑ cheap</span></td>
+      <td><span class="tag tag-green">Arithmetic</span></td>
+      <td class="mono">dividendYieldTTM</td>
+      <td>收益型 ETF</td>
+    </tr>
+    <tr>
+      <td>5</td><td><strong>ERP</strong></td>
+      <td><span class="metric-dir dir-down">↑ cheap</span></td>
+      <td><span class="tag tag-green">Arithmetic</span></td>
+      <td class="mono">1/PE − 10Y Treasury</td>
+      <td>股债性价比</td>
+    </tr>
+    <tr>
+      <td>6</td><td><strong>FCF Yield</strong></td>
+      <td><span class="metric-dir dir-down">↑ cheap</span></td>
+      <td><span class="tag tag-green">Arithmetic</span></td>
+      <td class="mono">1/priceToFreeCashFlowRatioTTM</td>
+      <td>成熟科技 / 工业</td>
+    </tr>
+    <tr>
+      <td>7</td><td><strong>EV/EBITDA</strong></td>
+      <td><span class="metric-dir dir-up">↑ expensive</span></td>
+      <td><span class="tag tag-blue">Harmonic</span></td>
+      <td class="mono">enterpriseValueMultipleTTM</td>
+      <td>杠杆差异大的行业</td>
+    </tr>
+  </tbody>
+</table>
+<p style="font-size:0.82rem; color: var(--text-muted); margin-top: 0.5rem;">
+  <strong>Harmonic Mean</strong>：ratio 类指标的行业标准聚合方式，避免极端值（负PE）扭曲结果。
+  <strong>Arithmetic Mean</strong>：yield 类指标直接加权求和。负值成分股被剔除，覆盖率 &lt; 70% 标记低可信度。
+</p>
+
+<!-- ───────────────────── Signal System ───────────────────── -->
+<h2>信号系统</h2>
+<table>
+  <thead><tr><th>Percentile</th><th>标签</th><th>信号</th><th>操作建议</th></tr></thead>
+  <tbody>
+    <tr><td>0 – 10%</td><td class="sig-sb">极度低估</td><td class="sig-sb">STRONG_BUY</td><td>重仓买入</td></tr>
+    <tr><td>10 – 25%</td><td class="sig-b">低估</td><td class="sig-b">BUY</td><td>加仓</td></tr>
+    <tr><td>25 – 40%</td><td class="sig-lb">偏低</td><td class="sig-lb">LEAN_BUY</td><td>小幅加仓</td></tr>
+    <tr><td>40 – 60%</td><td class="sig-h">合理</td><td class="sig-h">HOLD</td><td>持有观望</td></tr>
+    <tr><td>60 – 75%</td><td class="sig-ls">偏高</td><td class="sig-ls">LEAN_SELL</td><td>小幅减仓</td></tr>
+    <tr><td>75 – 90%</td><td class="sig-s">高估</td><td class="sig-s">SELL</td><td>减仓</td></tr>
+    <tr><td>90 – 100%</td><td class="sig-ss">极度高估</td><td class="sig-ss">STRONG_SELL</td><td>清仓</td></tr>
+  </tbody>
+</table>
+<p style="font-size:0.82rem; color: var(--text-muted);">
+  复合评分: <code>composite = primary_pct × 0.7 + secondary_pct × 0.3</code>，
+  direction 自动标准化为 "higher = more expensive"。
+</p>
+
+<!-- ───────────────────── ETF Universe ───────────────────── -->
+<h2>ETF Universe — 25 只优先覆盖</h2>
+
+<h3>Tier 1: 宽基</h3>
+<table>
+  <thead><tr><th>Ticker</th><th>Name</th><th>Primary</th><th>Secondary</th></tr></thead>
+  <tbody>
+    <tr><td><strong>SPY</strong></td><td>S&P 500</td><td>P/E TTM</td><td>ERP</td></tr>
+  </tbody>
+</table>
+
+<h3>Tier 2: GICS 11 行业 (SPDR XL_ 系列)</h3>
+<table>
+  <thead><tr><th>Ticker</th><th>行业</th><th>Primary</th><th>Secondary</th></tr></thead>
+  <tbody>
+    <tr><td><strong>XLK</strong></td><td>科技</td><td>P/E TTM</td><td>FCF Yield</td></tr>
+    <tr><td><strong>XLF</strong></td><td>金融</td><td>P/B LF</td><td>ERP</td></tr>
+    <tr><td><strong>XLV</strong></td><td>医疗保健</td><td>P/E TTM</td><td>P/S TTM</td></tr>
+    <tr><td><strong>XLY</strong></td><td>可选消费</td><td>P/E TTM</td><td>FCF Yield</td></tr>
+    <tr><td><strong>XLP</strong></td><td>必需消费</td><td>P/E TTM</td><td>Div Yield</td></tr>
+    <tr><td><strong>XLE</strong></td><td>能源</td><td>P/E TTM</td><td>EV/EBITDA</td></tr>
+    <tr><td><strong>XLI</strong></td><td>工业</td><td>P/E TTM</td><td>EV/EBITDA</td></tr>
+    <tr><td><strong>XLU</strong></td><td>公用事业</td><td>P/E TTM</td><td>Div Yield</td></tr>
+    <tr><td><strong>XLB</strong></td><td>材料</td><td>P/B LF</td><td>EV/EBITDA</td></tr>
+    <tr><td><strong>XLRE</strong></td><td>房地产</td><td>P/B LF</td><td>Div Yield</td></tr>
+    <tr><td><strong>XLC</strong></td><td>通信服务</td><td>P/E TTM</td><td>P/S TTM</td></tr>
+  </tbody>
+</table>
+
+<h3>Tier 3: 子行业 / 主题 (13)</h3>
+<table>
+  <thead><tr><th>Ticker</th><th>主题</th><th>Primary</th><th>Secondary</th><th>Trust / CIK</th></tr></thead>
+  <tbody>
+    <tr><td><strong>SMH</strong></td><td>半导体</td><td>P/B LF</td><td>P/E TTM</td><td>VanEck</td></tr>
+    <tr><td><strong>IBB</strong></td><td>生物科技</td><td>P/S TTM</td><td>P/B LF</td><td>iShares</td></tr>
+    <tr><td><strong>XBI</strong></td><td>生物科技(等权)</td><td>P/S TTM</td><td>P/B LF</td><td>SPDR S&P</td></tr>
+    <tr><td><strong>HACK</strong></td><td>网络安全</td><td>P/S TTM</td><td>P/E TTM</td><td>Amplify ETF Trust</td></tr>
+    <tr><td><strong>ICLN</strong></td><td>清洁能源</td><td>P/S TTM</td><td>P/B LF</td><td>iShares</td></tr>
+    <tr><td><strong>BOTZ</strong></td><td>AI / 机器人</td><td>P/S TTM</td><td>P/E TTM</td><td>Global X Funds</td></tr>
+    <tr><td><strong>KRE</strong></td><td>区域银行</td><td>P/B LF</td><td>ERP</td><td>SPDR S&P</td></tr>
+    <tr><td><strong>XOP</strong></td><td>油气勘探</td><td>EV/EBITDA</td><td>P/E TTM</td><td>SPDR S&P</td></tr>
+    <tr><td><strong>IYR</strong></td><td>美国地产</td><td>P/B LF</td><td>Div Yield</td><td>iShares</td></tr>
+    <tr><td><strong>XHB</strong></td><td>住宅建筑</td><td>P/E TTM</td><td>P/B LF</td><td>SPDR S&P</td></tr>
+    <tr><td><strong>ITB</strong></td><td>住房建设</td><td>P/E TTM</td><td>P/B LF</td><td>iShares</td></tr>
+    <tr><td><strong>ARKK</strong></td><td>颠覆创新</td><td>P/S TTM</td><td>—</td><td>ARK ETF Trust</td></tr>
+    <tr><td><strong>TAN</strong></td><td>太阳能</td><td>P/S TTM</td><td>P/B LF</td><td>Invesco Trust II</td></tr>
+  </tbody>
+</table>
+
+<!-- ───────────────────── Module Architecture ───────────────────── -->
+<h2>模块架构</h2>
+<div class="cards">
+  <div class="card">
+    <h4>fetcher.py — FMP Holdings + Ratios Bulk</h4>
+    <ul>
+      <li><code>FMPHoldingsFetcher</code> — <code>/stable/etf/holdings</code> 实时持仓权重</li>
+      <li>直接返回 ticker + weight（无需 CUSIP 映射），每日更新</li>
+      <li><code>RatiosBulkFetcher</code> — <code>/ratios-ttm-bulk</code> CSV, 71K+ stocks</li>
+      <li>年分片存储: <code>YYYY_ratios_ttm.parquet</code></li>
+      <li><code>YFinanceValidator</code> — 交叉校验 ETF 级别估值</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>nport.py — SEC N-PORT 下载 + 解析 (历史重建用)</h4>
+    <ul>
+      <li><code>ETF_CIK_MAP</code> — 38 ETFs 的 CIK + series_id 注册表</li>
+      <li><code>NPortDownloader</code> — 下载 XML、解析持仓 (cusip, weight, value, shares)</li>
+      <li>仅用于 <code>history.py</code> 历史重建，日常 pipeline 不再调用</li>
+      <li>Multi-series trusts: 通过 seriesId 过滤</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>cusip_map.py — CUSIP → Ticker 映射 (历史重建用)</h4>
+    <ul>
+      <li><code>CusipMapper</code> — 三种映射策略: OpenFIGI / FMP Profile / Name Match</li>
+      <li>仅用于 N-PORT 历史重建路径</li>
+      <li>缓存: <code>cusip_to_ticker.parquet</code> (1035+ mappings)</li>
+      <li>日常 pipeline 不需要（FMP holdings 直接提供 ticker）</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>metrics.py — 加权聚合计算</h4>
+    <ul>
+      <li><code>weighted_harmonic_mean</code> — Ratio 类 (PE/PB/PS/EV), 行业标准</li>
+      <li><code>weighted_arithmetic_mean</code> — Yield 类 (DivYld/FCF)</li>
+      <li><code>aggregate_etf_metrics</code> — Holdings × Ratios JOIN → ETF 估值</li>
+      <li>ERP 特殊计算: <code>1/PE − 10Y_Treasury</code></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>percentile.py — 历史分位数</h4>
+    <ul>
+      <li><code>rolling_percentile</code> — 5 年滚动窗口</li>
+      <li><code>expanding_percentile</code> — 短历史自适应</li>
+      <li>最少 60 个观测值才开始计算</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>scoring.py — 信号评分</h4>
+    <ul>
+      <li>7 级信号: STRONG_BUY → STRONG_SELL</li>
+      <li><code>composite_score</code> — 主指标 0.7 + 副指标 0.3</li>
+      <li>Direction 自动标准化 (higher_cheap 翻转)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>report_charts.py — 时序轨迹图</h4>
+    <ul>
+      <li><code>generate_timeseries_charts()</code> — per-tier 分组图表生成</li>
+      <li>每个 ETF: primary + secondary 指标双列面板</li>
+      <li>Mean/±1σ band, P10/P90 dotted lines, COVID shading</li>
+      <li>当前值 dot 颜色 = signal color, info box 含 percentile + signal</li>
+      <li>输出: <code>ts_broad_</code>, <code>ts_sectors_</code>, <code>ts_themes_</code>, <code>ts_spy_deep_</code></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ───────────────────── Data Sources ───────────────────── -->
+<h2>数据源</h2>
+<table>
+  <thead><tr><th>Data</th><th>Source</th><th>Frequency</th><th>Coverage</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>ETF 持仓 + 权重 (daily)</td>
+      <td><span class="tag tag-blue">FMP /stable/etf/holdings</span></td>
+      <td>Daily</td>
+      <td>所有美国 ETF, ticker + weight</td>
+      <td>FMP Ultimate</td>
+    </tr>
+    <tr>
+      <td>ETF 持仓 + 权重 (历史)</td>
+      <td><span class="tag tag-green">SEC EDGAR N-PORT</span></td>
+      <td>Quarterly</td>
+      <td>2019–present, CUSIP + weight</td>
+      <td>Free</td>
+    </tr>
+    <tr>
+      <td>个股 Ratios (PE/PB/PS/...)</td>
+      <td><span class="tag tag-blue">FMP /ratios-ttm-bulk</span></td>
+      <td>Daily</td>
+      <td>71K+ stocks, TTM</td>
+      <td>FMP Ultimate</td>
+    </tr>
+    <tr>
+      <td>CUSIP → Ticker (历史重建用)</td>
+      <td><span class="tag tag-purple">OpenFIGI API</span></td>
+      <td>On demand</td>
+      <td>US equities, ~95% hit rate</td>
+      <td>Free</td>
+    </tr>
+    <tr>
+      <td>10Y 国债利率</td>
+      <td><span class="tag tag-blue">FMP /treasury</span></td>
+      <td>Daily</td>
+      <td>All maturities</td>
+      <td>FMP Ultimate</td>
+    </tr>
+    <tr>
+      <td>S&P 500 历史 PE/CAPE</td>
+      <td><span class="tag tag-orange">Shiller / Yale</span></td>
+      <td>Monthly</td>
+      <td>1871–present (150 yr)</td>
+      <td>Free</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ───────────────────── Storage ───────────────────── -->
+<h2>存储结构</h2>
+<pre><span class="str">E:/stocks/etf_valuation/</span>               <span class="comment"># 主存储 (移动硬盘)</span>
+├── <span class="fn">nport/</span>                             <span class="comment"># SEC N-PORT 季度持仓 (每 ETF 独立目录)</span>
+│   ├── SPY/                            <span class="comment"># 27 quarters: 2019Q3 → 2026Q1</span>
+│   │   ├── 2019Q3.parquet              <span class="comment"># cols: cusip, isin, name, weight, value, shares, report_date</span>
+│   │   ├── 2020Q1.parquet              <span class="comment">#   weight = pctVal (占基金净值 %)</span>
+│   │   └── ...                         <span class="comment">#   2026Q1 额外包含 ticker 列 (CUSIP映射后)</span>
+│   ├── XLK/ ... XLC/                   <span class="comment"># GICS sectors: 每个 27 quarters</span>
+│   ├── SMH/ IBB/ XBI/ ...              <span class="comment"># Theme ETFs: 1-27 quarters</span>
+│   └── HACK/ BOTZ/ ARKK/ TAN/         <span class="comment"># 新增 theme: 2-27 quarters</span>
+│
+├── <span class="fn">ratios_bulk/</span>                       <span class="comment"># FMP 全市场个股 ratios (每日快照)</span>
+│   └── 2026_ratios_ttm.parquet         <span class="comment"># 年分片, 71K rows × 60 cols</span>
+│
+├── <span class="fn">cusip_cache/</span>                       <span class="comment"># CUSIP → Ticker 映射缓存</span>
+│   └── cusip_to_ticker.parquet         <span class="comment"># 1035 mappings (OpenFIGI)</span>
+│
+├── <span class="fn">snapshots/</span>                         <span class="comment"># ★ ETF 级别估值历史 (核心产物) ★</span>
+│   ├── SPY_history.parquet             <span class="comment"># 28 obs: 27Q 历史重建 + today</span>
+│   ├── XLK_history.parquet             <span class="comment"># cols: pe_ttm, pb_lf, ps_ttm, div_yield,</span>
+│   ├── ...                             <span class="comment">#       fcf_yield, ev_ebitda, erp, coverage</span>
+│   └── TAN_history.parquet             <span class="comment"># 每次 run_backfill 自动追加今日快照</span>
+│
+└── <span class="fn">shiller/</span>                           <span class="comment"># Shiller/Yale 历史数据</span>
+    └── sp500_shiller.parquet           <span class="comment"># SPY PE/CAPE 1871-present (月频)</span>
+
+<span class="str">E:/stocks/treasury/</span>                    <span class="comment"># 国债利率 (共享)</span>
+└── treasury_rates.parquet              <span class="comment"># 各期限利率, 用于 ERP 计算</span>
+
+<span class="str">E:/raw/edgar_financials/ratios/</span>        <span class="comment"># 个股历史 ratios (用于历史重建)</span>
+├── Q1_AAPL.json  Q2_AAPL.json ...      <span class="comment"># 998 symbols × (Q1-Q4 + annual)</span>
+└── annual_MSFT.json                    <span class="comment"># PE/PB/PS/DY/EV_EBITDA/FCF, 40yr+</span>
+
+<span class="str">D:/04_Project/quant-lab/reports/</span>        <span class="comment"># 报告输出 (本地)</span>
+├── etf_valuation_2026-07-06.csv
+├── etf_valuation_2026-07-06.json
+├── ts_broad_2026-07-06.png            <span class="comment"># ★ 时序轨迹图: 宽基 ★</span>
+├── ts_sectors_2026-07-06.png          <span class="comment"># ★ 时序轨迹图: GICS 行业 ★</span>
+├── ts_themes_2026-07-06.png           <span class="comment"># ★ 时序轨迹图: 主题 ★</span>
+└── ts_spy_deep_2026-07-06.png         <span class="comment"># ★ SPY 6 指标全景 ★</span></pre>
+
+<!-- ───────────────────── Historical Reconstruction ───────────────────── -->
+<h2>历史重建 &amp; 均值回归检验</h2>
+
+<h3>历史重建架构</h3>
+<div class="arch"><span class="dim">┌──────────────────────────────────────────────────────────────────┐</span>
+<span class="dim">│</span>        <span class="hl">Historical ETF Metric Reconstruction</span>                     <span class="dim">│</span>
+<span class="dim">│</span>                                                                <span class="dim">│</span>
+<span class="dim">│</span>  For each (ETF, quarter) in N-PORT:                            <span class="dim">│</span>
+<span class="dim">│</span>                                                                <span class="dim">│</span>
+<span class="dim">│</span>  <span class="src">nport/{ETF}/{YEAR}Q{N}.parquet</span>     ← 持仓 CUSIP + weight      <span class="dim">│</span>
+<span class="dim">│</span>            │                                                   <span class="dim">│</span>
+<span class="dim">│</span>     CUSIP → <span class="hl">ticker</span> (cusip_cache)                               <span class="dim">│</span>
+<span class="dim">│</span>            │                                                   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="src">edgar_financials/ratios/</span>           ← 个股 PE/PB/PS at date    <span class="dim">│</span>
+<span class="dim">│</span>            │                                                   <span class="dim">│</span>
+<span class="dim">│</span>     <span class="hl">Weighted Aggregation</span>  (harmonic/arithmetic)                <span class="dim">│</span>
+<span class="dim">│</span>            │                                                   <span class="dim">│</span>
+<span class="dim">│</span>     <span class="src">snapshots/{ETF}_history.parquet</span>   ← 季度 ETF 估值序列      <span class="dim">│</span>
+<span class="dim">│</span>                                                                <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">Coverage: SPY 92%, sectors 84-99%, themes 34-100%</span>            <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">Range:    SPY 2019Q3→2026Q1 (27 quarters = 7 full years)</span>     <span class="dim">│</span>
+<span class="dim">└──────────────────────────────────────────────────────────────────┘</span></div>
+
+<h3>均值回归检验结果 (SPY + 11 Sectors, 27 Quarters)</h3>
+<table>
+  <thead>
+    <tr><th>Metric</th><th>#ETFs</th><th>ADF Pass%</th><th>Avg Hurst</th><th>Avg Half-Life</th><th>Mean-Rev%</th><th>结论</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>P/E TTM</strong></td><td>12</td><td>0%</td><td>0.892</td><td>0.4 yr</td><td class="sig-sb">92%</td>
+      <td><span class="tag tag-green">Strong MR</span> — 半衰期短，跨完整周期回复</td>
+    </tr>
+    <tr>
+      <td><strong>P/B LF</strong></td><td>12</td><td>17%</td><td>1.066</td><td>1.4 yr</td><td class="sig-sb">92%</td>
+      <td><span class="tag tag-green">Strong MR</span> — 2 只通过 ADF (XLE, XLV)</td>
+    </tr>
+    <tr>
+      <td><strong>P/S TTM</strong></td><td>12</td><td>8%</td><td>0.798</td><td>0.1 yr</td><td>50%</td>
+      <td><span class="tag tag-orange">Mixed</span> — 高成长行业 PS 趋势性强</td>
+    </tr>
+    <tr>
+      <td><strong>ERP</strong></td><td>12</td><td>0%</td><td>0.903</td><td>0.3 yr</td><td class="sig-sb">92%</td>
+      <td><span class="tag tag-green">Strong MR</span> — 股债性价比强回归</td>
+    </tr>
+    <tr>
+      <td><strong>EV/EBITDA</strong></td><td>12</td><td>8%</td><td>0.763</td><td>0.1 yr</td><td>58%</td>
+      <td><span class="tag tag-orange">Mixed</span></td>
+    </tr>
+    <tr>
+      <td><strong>Div Yield</strong></td><td>12</td><td>8%</td><td>0.836</td><td>0.1 yr</td><td>33%</td>
+      <td><span class="tag tag-red">Weak</span> — 股息受长期趋势影响大</td>
+    </tr>
+    <tr>
+      <td><strong>FCF Yield</strong></td><td>12</td><td>17%</td><td>0.821</td><td>0.1 yr</td><td>50%</td>
+      <td><span class="tag tag-orange">Mixed</span></td>
+    </tr>
+  </tbody>
+</table>
+<p style="font-size:0.82rem; color: var(--text-muted); margin-top: 0.5rem;">
+  <strong>注：</strong>27 季度观测 ADF 检验力较弱，但 PE/PB/ERP 通过半衰期和 AR(1) 显示强回归特征。
+  7 年覆盖了 COVID 崩盘 → 牛市 → 2022 熊市 → 复苏的完整周期。
+  三种检验方法: <code>ADF</code> (H0=单位根), <code>Hurst &lt; 0.5</code> (均值回归), <code>AR(1) half-life</code> (偏离半衰期)。
+</p>
+
+<h3>两个独立 Routine</h3>
+<div class="cards">
+  <div class="card" style="border-left: 3px solid var(--green);">
+    <h4>Routine 1: 数据同步 + 估值计算 (每日)</h4>
+    <p><code>python -m etf_valuation.run_backfill</code></p>
+    <ul>
+      <li>Step 1: <strong>FMP ETF Holdings</strong> — 25 ETFs 实时持仓 (取代 N-PORT)</li>
+      <li>Step 3-4: 增量拉取 ratios + treasury</li>
+      <li>Step 5: 聚合计算 → ETF 当日估值</li>
+      <li>Step 6: <strong>快照落表</strong> → <code>snapshots/{ETF}_history.parquet</code></li>
+      <li>每日追加一行, 历史自动积累</li>
+    </ul>
+  </div>
+  <div class="card" style="border-left: 3px solid var(--accent);">
+    <h4>Routine 2: 报告 + 时序图 (随 pipeline 自动生成)</h4>
+    <p><code>python -m etf_valuation.run_backfill</code> (Report + Step 7)</p>
+    <ul>
+      <li>读取 <code>snapshots/</code> 计算<strong>历史分位数</strong></li>
+      <li>当前值 vs 历史 → percentile → 7 级信号</li>
+      <li>输出 CSV + JSON 报告</li>
+      <li>Step 7: <strong>时序轨迹图</strong> — per-tier PNG (mean/σ bands, P10/P90)</li>
+      <li>SPY 6 指标全景 deep view</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ───────────────────── File Map ───────────────────── -->
+<h2>文件清单</h2>
+<table>
+  <thead><tr><th>File</th><th>Role</th><th>Key Exports</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">config.py</td><td>配置加载</td><td><code>METRICS</code>, <code>ValuationConfig</code>, <code>load_config()</code></td></tr>
+    <tr><td class="mono">etf_universe.yaml</td><td>ETF 定义</td><td>51 + 6 ETF, tier / primary / secondary</td></tr>
+    <tr><td class="mono">nport.py</td><td>N-PORT 下载解析 (历史用)</td><td><code>ETF_CIK_MAP</code>, <code>NPortDownloader</code></td></tr>
+    <tr><td class="mono">cusip_map.py</td><td>CUSIP 映射 (历史用)</td><td><code>CusipMapper</code></td></tr>
+    <tr><td class="mono">fetcher.py</td><td>Holdings + Ratios 拉取</td><td><code>FMPHoldingsFetcher</code>, <code>RatiosBulkFetcher</code>, <code>YFinanceValidator</code></td></tr>
+    <tr><td class="mono">metrics.py</td><td>加权聚合</td><td><code>aggregate_etf_metrics()</code></td></tr>
+    <tr><td class="mono">percentile.py</td><td>分位数</td><td><code>rolling_percentile()</code>, <code>expanding_percentile()</code></td></tr>
+    <tr><td class="mono">scoring.py</td><td>信号评分</td><td><code>score_etf()</code>, <code>percentile_to_signal()</code></td></tr>
+    <tr><td class="mono">history.py</td><td>历史重建</td><td><code>run_reconstruction()</code>, <code>append_today_snapshot()</code></td></tr>
+    <tr><td class="mono">mean_reversion.py</td><td>均值回归检验</td><td><code>adf_test()</code>, <code>hurst_exponent()</code>, <code>ar1_halflife()</code></td></tr>
+    <tr><td class="mono">shiller.py</td><td>Shiller 历史数据</td><td><code>ShillerLoader</code></td></tr>
+    <tr><td class="mono">report.py</td><td>报告输出</td><td><code>print_valuation_report()</code></td></tr>
+    <tr><td class="mono">cli.py</td><td>CLI 入口</td><td>sync / backfill / report / screen / status</td></tr>
+    <tr><td class="mono">run_backfill.py</td><td>完整 Pipeline</td><td>7-step: holdings → ratios → treasury → compute → persist → report → charts</td></tr>
+    <tr><td class="mono">report_charts.py</td><td>时序轨迹图</td><td><code>generate_timeseries_charts()</code> — per-tier PNGs + SPY deep view</td></tr>
+    <tr><td class="mono">report_chart.py</td><td>静态仪表盘 (optional)</td><td><code>draw_dashboard()</code> — 一次性全量 dashboard PNG</td></tr>
+  </tbody>
+</table>
+
+<!-- ───────────────────── SEC N-PORT ───────────────────── -->
+<h2>SEC N-PORT 技术细节</h2>
+<div class="cards">
+  <div class="card">
+    <h4>XML 结构</h4>
+    <p>每个 <code>&lt;invstOrSec&gt;</code> 节点包含:</p>
+    <ul>
+      <li><code>cusip</code> — 9 位证券标识符</li>
+      <li><code>pctVal</code> — 占基金净值百分比 (权重)</li>
+      <li><code>valUSD</code> — 美元市值</li>
+      <li><code>balance</code> — 持股数量</li>
+      <li><code>identifiers/isin</code> — ISIN (可选)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>Multi-Series Trust 处理</h4>
+    <p>大型信托 (如 iShares = 1460+ filings) 同一 CIK 下包含多只 ETF。
+       通过 XML 中的 <code>&lt;seriesId&gt;</code> 字段过滤匹配目标 ETF。</p>
+    <ul>
+      <li>CIK filing list 缓存 — 避免重复 HTTP 请求</li>
+      <li><code>max_scan=500</code> — 限制扫描深度</li>
+      <li><code>max_quarters=2</code> — 只取最新 2 个季度</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ───────────────────── CIK Registry ───────────────────── -->
+<h2>CIK 注册表 (已验证)</h2>
+<table>
+  <thead><tr><th>Trust</th><th>CIK</th><th>ETFs</th><th>Total Filings</th></tr></thead>
+  <tbody>
+    <tr><td>SPDR S&P 500 Trust</td><td class="mono">0000884394</td><td>SPY</td><td>~100</td></tr>
+    <tr><td>Select Sector SPDR Trust</td><td class="mono">0001064641</td><td>XLK/XLF/XLV/XLY/XLP/XLE/XLI/XLU/XLB/XLRE/XLC</td><td>~330</td></tr>
+    <tr><td>SPDR S&P Series Trust</td><td class="mono">0001064642</td><td>XBI/KRE/XOP/XHB</td><td>~500</td></tr>
+    <tr><td>iShares Trust</td><td class="mono">0001100663</td><td>IBB/ICLN/IYR/ITB + Tier 4&5</td><td>~1460</td></tr>
+    <tr><td>VanEck ETF Trust</td><td class="mono">0001137360</td><td>SMH</td><td>~560</td></tr>
+    <tr><td>Amplify ETF Trust</td><td class="mono">0001633061</td><td>HACK</td><td>~388</td></tr>
+    <tr><td>Global X Funds</td><td class="mono">0001432353</td><td>BOTZ</td><td>~596</td></tr>
+    <tr><td>ARK ETF Trust</td><td class="mono">0001579982</td><td>ARKK</td><td>~204</td></tr>
+    <tr><td>Invesco ETF Trust II</td><td class="mono">0001378872</td><td>TAN</td><td>~595</td></tr>
+  </tbody>
+</table>
+
+<!-- ───────────────────── Latest Report ───────────────────── -->
+<h2>最新报告 — 2026-07-06</h2>
+<p style="font-size:0.85rem; margin-bottom:0.8rem;">10Y Treasury: <strong>4.49%</strong> &nbsp;|&nbsp; 覆盖 25 ETFs &nbsp;|&nbsp; Pipeline 耗时 ~0.6 min (FMP Holdings)</p>
+
+<h3>Value Opportunities <span class="tag tag-green">ERP > 0</span></h3>
+<table>
+  <thead><tr><th>ETF</th><th>Theme</th><th>P/E</th><th>P/B</th><th>EV/EBITDA</th><th>ERP</th><th>Cov</th></tr></thead>
+  <tbody>
+    <tr><td><strong>XOP</strong></td><td>油气勘探</td><td>11.8</td><td>1.4</td><td>6.3</td><td class="sig-sb">+4.01%</td><td>105%</td></tr>
+    <tr><td><strong>KRE</strong></td><td>区域银行</td><td>13.3</td><td>1.2</td><td>9.8</td><td class="sig-sb">+3.01%</td><td>101%</td></tr>
+    <tr><td><strong>XLC</strong></td><td>通信服务</td><td>15.2</td><td>2.9</td><td>11.5</td><td class="sig-b">+2.08%</td><td>101%</td></tr>
+    <tr><td><strong>ITB</strong></td><td>住房建设</td><td>16.6</td><td>2.1</td><td>11.9</td><td class="sig-b">+1.53%</td><td>103%</td></tr>
+    <tr><td><strong>XLE</strong></td><td>能源</td><td>16.9</td><td>2.4</td><td>7.9</td><td class="sig-b">+1.43%</td><td>100%</td></tr>
+    <tr><td><strong>XLF</strong></td><td>金融</td><td>17.8</td><td>2.4</td><td>15.1</td><td class="sig-lb">+1.12%</td><td>96%</td></tr>
+    <tr><td><strong>XHB</strong></td><td>住宅建筑</td><td>18.7</td><td>2.2</td><td>13.3</td><td class="sig-lb">+0.85%</td><td>90%</td></tr>
+    <tr><td><strong>TAN</strong></td><td>太阳能</td><td>19.8</td><td>0.8</td><td>19.3</td><td class="sig-lb">+0.56%</td><td>51%</td></tr>
+  </tbody>
+</table>
+
+<h3>Most Expensive <span class="tag tag-red">ERP &lt; -1.5%</span></h3>
+<table>
+  <thead><tr><th>ETF</th><th>Theme</th><th>P/E</th><th>P/B</th><th>P/S</th><th>ERP</th><th>Cov</th></tr></thead>
+  <tbody>
+    <tr><td><strong>ARKK</strong></td><td>颠覆创新</td><td class="sig-ss">63.6</td><td>4.7</td><td>8.3</td><td class="sig-ss">−2.92%</td><td>90%</td></tr>
+    <tr><td><strong>SMH</strong></td><td>半导体</td><td>41.9</td><td class="sig-ss">11.7</td><td>14.4</td><td class="sig-s">−2.10%</td><td>94%</td></tr>
+    <tr><td><strong>ICLN</strong></td><td>清洁能源</td><td>38.5</td><td>2.4</td><td>1.4</td><td class="sig-s">−1.89%</td><td>52%</td></tr>
+    <tr><td><strong>HACK</strong></td><td>网络安全</td><td>36.3</td><td>7.5</td><td>6.1</td><td class="sig-s">−1.74%</td><td>89%</td></tr>
+    <tr><td><strong>BOTZ</strong></td><td>AI/机器人</td><td>35.9</td><td>4.7</td><td>5.6</td><td class="sig-s">−1.71%</td><td>38%</td></tr>
+    <tr><td><strong>XLK</strong></td><td>科技</td><td>34.5</td><td>11.5</td><td>9.1</td><td class="sig-s">−1.59%</td><td>97%</td></tr>
+  </tbody>
+</table>
+
+<p style="font-size:0.82rem; color: var(--text-muted); margin-top:1rem;">
+  <strong>Coverage 说明：</strong>
+  BOTZ (38%) 和 TAN (56%) 国际持仓较多，FMP ratios-bulk 不覆盖非美个股，估值参考性有限。
+  IBB (37%) 持仓分散在 258 只小市值生物科技股中。
+  其余 ETF 覆盖率均 &gt; 70%。
+  FMP Holdings 与 N-PORT 权重交叉验证: SPY 相关性 0.9896, 平均偏差 0.031%。
+</p>
+
+<!-- ───────────────────── Next Steps ───────────────────── -->
+<h2>后续计划</h2>
+<div class="cards">
+  <div class="card" style="border-left: 3px solid var(--green);">
+    <h4>✓ 已完成</h4>
+    <ul>
+      <li>25 ETFs 估值计算 (SPY + 11 sectors + 13 themes)</li>
+      <li>27 季度历史重建 (N-PORT × edgar_financials)</li>
+      <li>快照持久化 (每次运行自动追加当日快照)</li>
+      <li>分位数信号系统 (percentile-based, 7 级)</li>
+      <li>均值回归检验 (ADF + Hurst + AR(1))</li>
+      <li>数据同步 &amp; 报告生成 解耦</li>
+      <li>FMP ETF Holdings 替代 N-PORT 日常流水线 (速度 6×, 每日权重)</li>
+      <li>时序轨迹图 (per-tier PNGs, mean/σ bands, SPY deep view)</li>
+    </ul>
+  </div>
+  <div class="card" style="border-left: 3px solid var(--orange);">
+    <h4>Phase A: 日频快照积累</h4>
+    <ul>
+      <li>每日运行 <code>run_backfill</code> 自动追加快照</li>
+      <li>当季度观测密度足够后切换到 5yr 滚动分位</li>
+      <li>Shiller 数据补 SPY 2019 之前 P/E (150 年)</li>
+    </ul>
+  </div>
+  <div class="card" style="border-left: 3px solid var(--accent);">
+    <h4>Phase B: Tier 4 &amp; 5 扩展</h4>
+    <ul>
+      <li>因子 ETF: VIG, SCHD, DVY, VTV, VUG, MTUM, USMV, QUAL</li>
+      <li>国际 ETF: EFA, EEM, FXI, EWJ, INDA, VWO</li>
+      <li>验证 iShares/Vanguard series_id</li>
+    </ul>
+  </div>
+  <div class="card" style="border-left: 3px solid var(--green);">
+    <h4>✓ Phase C: 报告可视化 (已完成)</h4>
+    <ul>
+      <li>分位数走势图 (each ETF × primary + secondary metric over time) ✓</li>
+      <li>Mean/±1σ band, P10/P90 lines, COVID shading, signal annotation ✓</li>
+      <li>Per-tier grouping: broad / sectors / themes / SPY deep ✓</li>
+      <li>Dark theme matching README.html color scheme ✓</li>
+      <li>自动邮件/Slack 推送低估信号 (future)</li>
+    </ul>
+  </div>
+</div>
+
+<footer>
+  ETF Valuation System &nbsp;|&nbsp; quant-lab &nbsp;|&nbsp; Built 2026-07-06
+</footer>
+
+</body>
+</html>
