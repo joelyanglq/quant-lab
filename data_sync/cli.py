@@ -21,7 +21,7 @@ from data_sync.providers import get_provider
 from data_sync.status import StatusManager, print_summary, print_symbol_detail, print_stale, refresh_from_storage
 from data_sync.symbols import resolve_symbol_selector
 
-PROVIDER_ORDER = ["universe", "prices_1d", "prices_1min", "financials", "analysts"]
+PROVIDER_ORDER = ["universe", "prices_1d", "prices_1min", "financials", "analysts", "treasury"]
 
 
 def cmd_status(args, config: ETLConfig):

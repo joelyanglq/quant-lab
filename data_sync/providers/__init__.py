@@ -67,3 +67,7 @@ def _import_providers():
         import data_sync.providers.universe  # noqa: F401
     except ImportError:
         pass
+    try:
+        import data_sync.providers.treasury  # noqa: F401
+    except ImportError:
+        pass
